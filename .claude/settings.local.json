@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /c/Users/aliha/Desktop/APOGEO/claw-code/rust/crates/*/src/*.rs)",
+      "Bash(wc -l \"C:\\\\Users\\\\aliha\\\\Desktop\\\\APOGEO\\\\awesome-opencode\\\\data/plugins\"/*.yaml)",
+      "Bash(while read:*)",
+      "Bash(do dirname:*)",
+      "Bash(done)",
+      "Bash(python -c \":*)",
+      "Bash(grep -n anyb C:/Users/aliha/Desktop/APOGEO/ali_researcher/frontend/src/components/PapersTable.tsx C:/Users/aliha/Desktop/APOGEO/ali_researcher/frontend/src/lib/api.ts C:/Users/aliha/Desktop/APOGEO/ali_researcher/frontend/src/app/research/[id]/page.tsx)",
+      "Bash(for f:*)",
+      "Bash(do)",
+      "Bash(echo \"=== $f ===\")",
+      "Read(//c/Users/aliha/Desktop/APOGEO/ali_researcher/**)",
+      "Bash(npm install:*)",
+      "Bash(npm audit:*)",
+      "Bash(pip install:*)",
+      "Read(//c/searxng/**)",
+      "Bash(docker compose:*)",
+      "Bash(curl -s \"http://localhost:8080/search?q=test&format=json\")",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f''''OK - {len\\(d[\"\"results\"\"]\\)} results''''\\)\")",
+      "Bash(git init:*)",
+      "Bash(git remote:*)",
+      "Bash(find /c/Users/aliha/Desktop/APOGEO/ali_researcher -name *.env -o -name .env* -o -name *.key -o -name *.secret)",
+      "Bash(git add:*)"
+    ]
+  }
+}
