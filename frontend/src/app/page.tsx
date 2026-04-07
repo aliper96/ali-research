@@ -1,6 +1,6 @@
 import SearchForm from '@/components/SearchForm'
 import SessionHistory from '@/components/SessionHistory'
-import { BookOpen, Cpu, Database, Globe, FileText } from 'lucide-react'
+import { BookOpen, Cpu, Database, Globe, FileText, FlaskConical, Bell, GitCompareArrows, RefreshCw, BookMarked, FolderOpen, Brain } from 'lucide-react'
 import Link from 'next/link'
 
 export default function HomePage() {
@@ -27,7 +27,8 @@ export default function HomePage() {
       <div className="relative flex flex-1 flex-col items-center justify-center px-4 py-16">
         {/* Header */}
         <div className="mb-12 text-center space-y-4">
-          <div className="flex items-center justify-center gap-3 mb-6">
+          {/* Row 1: branding + existing tools */}
+          <div className="flex flex-wrap items-center justify-center gap-2 mb-3">
             <div className="inline-flex items-center gap-2 rounded-full border border-indigo-800/50 bg-indigo-900/20 px-4 py-1.5 text-xs text-indigo-300">
               <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" />
               Powered by Claude AI
@@ -45,6 +46,73 @@ export default function HomePage() {
             >
               <FileText className="h-3.5 w-3.5" />
               Review My Paper
+            </Link>
+            <Link
+              href="/audit"
+              className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-1.5 text-xs text-slate-400 hover:border-amber-700/60 hover:bg-amber-900/20 hover:text-amber-300 transition-all duration-200"
+            >
+              <FlaskConical className="h-3.5 w-3.5" />
+              Audit a Paper
+            </Link>
+            <Link
+              href="/watch"
+              className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-1.5 text-xs text-slate-400 hover:border-emerald-700/60 hover:bg-emerald-900/20 hover:text-emerald-300 transition-all duration-200"
+            >
+              <Bell className="h-3.5 w-3.5" />
+              Watches
+            </Link>
+          </div>
+
+          {/* Row 2: new workflows */}
+          <div className="flex flex-wrap items-center justify-center gap-2 mb-6">
+            <Link
+              href="/deepresearch"
+              className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-1.5 text-xs text-slate-400 hover:border-indigo-700/60 hover:bg-indigo-900/20 hover:text-indigo-300 transition-all duration-200"
+            >
+              <Cpu className="h-3.5 w-3.5" />
+              Deep Research
+            </Link>
+            <Link
+              href="/autoresearch"
+              className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-1.5 text-xs text-slate-400 hover:border-emerald-700/60 hover:bg-emerald-900/20 hover:text-emerald-300 transition-all duration-200"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Auto Research
+            </Link>
+            <Link
+              href="/lit"
+              className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-1.5 text-xs text-slate-400 hover:border-violet-700/60 hover:bg-violet-900/20 hover:text-violet-300 transition-all duration-200"
+            >
+              <BookMarked className="h-3.5 w-3.5" />
+              Lit Review
+            </Link>
+            <Link
+              href="/compare"
+              className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-1.5 text-xs text-slate-400 hover:border-cyan-700/60 hover:bg-cyan-900/20 hover:text-cyan-300 transition-all duration-200"
+            >
+              <GitCompareArrows className="h-3.5 w-3.5" />
+              Compare
+            </Link>
+            <Link
+              href="/draft"
+              className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-1.5 text-xs text-slate-400 hover:border-orange-700/60 hover:bg-orange-900/20 hover:text-orange-300 transition-all duration-200"
+            >
+              <FileText className="h-3.5 w-3.5" />
+              Draft
+            </Link>
+            <Link
+              href="/outputs"
+              className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-1.5 text-xs text-slate-400 hover:border-yellow-700/60 hover:bg-yellow-900/20 hover:text-yellow-300 transition-all duration-200"
+            >
+              <FolderOpen className="h-3.5 w-3.5" />
+              Outputs
+            </Link>
+            <Link
+              href="/knowledge"
+              className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-1.5 text-xs text-slate-400 hover:border-teal-700/60 hover:bg-teal-900/20 hover:text-teal-300 transition-all duration-200"
+            >
+              <Brain className="h-3.5 w-3.5" />
+              Knowledge
             </Link>
           </div>
 

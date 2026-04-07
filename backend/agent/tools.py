@@ -18,6 +18,7 @@ from pypdf import PdfReader
 
 from ..storage.research_store import research_store
 from ..storage.session_store import session_store
+from ..storage import db as _db
 
 logger = logging.getLogger(__name__)
 
@@ -211,12 +212,27 @@ async def get_arxiv_paper(arxiv_id: str) -> dict[str, Any]:
 
 
 async def search_semantic_scholar(query: str, max_results: int = 10) -> list[dict[str, Any]]:
+    # Retry up to 3 times with backoff on 429
+    for attempt in range(3):
+        try:
+            data = await _http_get_json(
+                f"{_SEMSCHOLAR_BASE}/paper/search",
+                params={"query": query, "limit": max_results, "fields": _SS_FIELDS},
+                headers={"User-Agent": "ali_researcher/1.0"},
+            )
+            break  # success
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 429 and attempt < 2:
+                await asyncio.sleep(2 ** attempt + 1)  # 2s, 3s
+                continue
+            logger.error("search_semantic_scholar failed: %s", exc)
+            return []
+        except Exception as exc:
+            logger.error("search_semantic_scholar failed: %s", exc)
+            return []
+    else:
+        return []
     try:
-        data = await _http_get_json(
-            f"{_SEMSCHOLAR_BASE}/paper/search",
-            params={"query": query, "limit": max_results, "fields": _SS_FIELDS},
-            headers={"User-Agent": "ali_researcher/1.0"},
-        )
         papers: list[dict[str, Any]] = []
         for item in data.get("data", []):
             ext = item.get("externalIds") or {}
@@ -829,6 +845,63 @@ async def quality_review(report: dict[str, Any], papers: list[dict[str, Any]]) -
     return {"issues": issues, "ready_for_user": not issues, "citation_status": citation_status}
 
 
+async def fetch_url(url: str, max_chars: int = 8000) -> dict[str, Any]:
+    """
+    Fetch the text content of any public URL — GitHub raw files, READMEs, docs.
+
+    For github.com URLs, automatically rewrites to raw.githubusercontent.com so
+    the agent gets plain text instead of HTML.  Returns the first *max_chars*
+    characters of the response body.
+    """
+    # Rewrite GitHub blob URLs → raw content
+    raw_url = url
+    gh_blob = re.match(
+        r"https://github\.com/([^/]+/[^/]+)/blob/([^/]+)/(.*)", url
+    )
+    if gh_blob:
+        raw_url = f"https://raw.githubusercontent.com/{gh_blob.group(1)}/{gh_blob.group(2)}/{gh_blob.group(3)}"
+
+    # Rewrite github.com/<owner>/<repo> (root) → raw README
+    gh_root = re.match(r"https://github\.com/([^/]+/[^/]+?)/?$", url)
+    if gh_root and not gh_blob:
+        # Try to fetch README via GitHub API
+        api_url = f"https://api.github.com/repos/{gh_root.group(1)}/readme"
+        try:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                resp = await client.get(
+                    api_url,
+                    headers={"Accept": "application/vnd.github.raw", "User-Agent": "ali_researcher/1.0"},
+                )
+                if resp.status_code == 200:
+                    content = resp.text[:max_chars]
+                    return {"url": url, "content": content, "chars": len(content), "source": "github_readme"}
+        except Exception:
+            pass  # fall through to generic fetch
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            resp = await client.get(
+                raw_url,
+                headers={"User-Agent": "ali_researcher/1.0"},
+            )
+            resp.raise_for_status()
+            text = resp.text[:max_chars]
+            return {"url": raw_url, "content": text, "chars": len(text), "status_code": resp.status_code}
+    except Exception as exc:
+        return {"url": raw_url, "content": "", "chars": 0, "error": str(exc)}
+
+
+async def search_session_memory(query: str, limit: int = 10) -> dict[str, Any]:
+    """Search papers seen in previous research sessions stored in PostgreSQL."""
+    results = await _db.search_papers_memory(query, limit=limit)
+    return {
+        "query": query,
+        "total_found": len(results),
+        "papers": results,
+        "note": "These papers were collected in prior sessions — use them to avoid re-fetching known sources.",
+    }
+
+
 async def compact_context(text: str, max_chars: int = 4000) -> dict[str, Any]:
     sentences = _sentence_split(text)
     summary = " ".join(sentences[: min(len(sentences), 12)])
@@ -886,6 +959,8 @@ TOOL_SPECS: list[dict[str, Any]] = [
     _tool_spec("budget_status", "Inspect current tool-call budget and progress for a session.", {"session_id": {"type": "string"}, "max_tool_calls": {"type": "integer"}}, ["session_id"]),
     _tool_spec("quality_review", "Perform a deterministic quality check over a draft report.", {"report": {"type": "object"}, "papers": {"type": "array", "items": {"type": "object"}}}, ["report", "papers"]),
     _tool_spec("compact_context", "Compress long text into a smaller summary payload.", {"text": {"type": "string"}, "max_chars": {"type": "integer"}}, ["text"]),
+    _tool_spec("search_session_memory", "Search papers seen in prior research sessions (cross-session memory). Call this early to avoid re-fetching known sources.", {"query": {"type": "string"}, "limit": {"type": "integer", "default": 10}}, ["query"]),
+    _tool_spec("fetch_url", "Fetch the text content of any public URL — GitHub READMEs, raw source files, docs pages. Auto-rewrites GitHub blob URLs to raw content.", {"url": {"type": "string"}, "max_chars": {"type": "integer", "default": 8000}}, ["url"]),
 ]
 
 
@@ -924,6 +999,8 @@ _TOOL_MAP = {
     "budget_status": budget_status,
     "quality_review": quality_review,
     "compact_context": compact_context,
+    "search_session_memory": search_session_memory,
+    "fetch_url": fetch_url,
 }
 
 

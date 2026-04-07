@@ -1,4 +1,8 @@
-import type { Depth, GraphData, ResearchSession, SSEEvent } from '@/lib/types'
+import type {
+  AuditSession, CompareResult, DeepResearchSession, DraftFormat, DraftResult,
+  AutoResearchSession, LitSession, Depth, GraphData, KnowledgePaper,
+  KnowledgeStats, ResearchSession, SessionArtifacts, SSEEvent,
+} from '@/lib/types'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
@@ -135,6 +139,229 @@ export function streamReview(
   const url = `${API_BASE_URL}/api/review/${sessionId}/stream`
   const es = new EventSource(url)
 
+  es.addEventListener('progress', (e: MessageEvent) => {
+    try { onEvent(JSON.parse(e.data as string)) } catch {}
+  })
+  es.addEventListener('complete', (e: MessageEvent) => {
+    try { onEvent({ ...JSON.parse(e.data as string), type: 'complete' }) } catch { onEvent({ type: 'complete' }) }
+    es.close()
+  })
+  es.onerror = () => { onEvent({ type: 'error', message: 'Stream error' }); es.close() }
+  return () => es.close()
+}
+
+// ---------------------------------------------------------------------------
+// Audit API
+// ---------------------------------------------------------------------------
+
+export async function startAudit(input: string): Promise<{ session_id: string }> {
+  return fetchJSON<{ session_id: string }>('/api/audit', {
+    method: 'POST',
+    body: JSON.stringify({ input }),
+  })
+}
+
+export async function getAuditSession(sessionId: string): Promise<AuditSession> {
+  return fetchJSON<AuditSession>(`/api/audit/${sessionId}`)
+}
+
+export interface AuditSummary {
+  session_id: string
+  input: string
+  status: 'running' | 'completed' | 'error'
+  created_at: string
+  verdict: string | null
+  paper_title: string | null
+}
+
+export async function listAudits(limit = 20): Promise<AuditSummary[]> {
+  return fetchJSON<AuditSummary[]>(`/api/audits?limit=${limit}`)
+}
+
+// ---------------------------------------------------------------------------
+// Watch API
+// ---------------------------------------------------------------------------
+
+export interface Watch {
+  watch_id: string
+  query: string
+  depth: string
+  schedule_hours: number
+  active: boolean
+  created_at: string
+  last_run_at: string | null
+  next_run_at: string | null
+  last_result: {
+    session_id: string
+    paper_count: number
+    top_papers: string[]
+    summary: string
+  } | null
+}
+
+export async function createWatch(query: string, depth: string, schedule_hours: number): Promise<Watch> {
+  return fetchJSON<Watch>('/api/watch', {
+    method: 'POST',
+    body: JSON.stringify({ query, depth, schedule_hours }),
+  })
+}
+
+export async function listWatches(): Promise<Watch[]> {
+  return fetchJSON<Watch[]>('/api/watches')
+}
+
+export async function deleteWatch(watchId: string): Promise<void> {
+  await fetchJSON(`/api/watch/${watchId}`, { method: 'DELETE' })
+}
+
+export async function runWatchNow(watchId: string): Promise<{ status: string }> {
+  return fetchJSON(`/api/watch/${watchId}/run`, { method: 'POST' })
+}
+
+export function streamAudit(sessionId: string, onEvent: (event: SSEEvent) => void): () => void {
+  const es = new EventSource(`${API_BASE_URL}/api/audit/${sessionId}/stream`)
+  es.addEventListener('progress', (e: MessageEvent) => {
+    try { onEvent(JSON.parse(e.data as string)) } catch {}
+  })
+  es.addEventListener('complete', (e: MessageEvent) => {
+    try { onEvent({ ...JSON.parse(e.data as string), type: 'complete' }) } catch { onEvent({ type: 'complete' }) }
+    es.close()
+  })
+  es.onerror = () => { onEvent({ type: 'error', message: 'Stream error' }); es.close() }
+  return () => es.close()
+}
+
+// ---------------------------------------------------------------------------
+// Deep Research API
+// ---------------------------------------------------------------------------
+
+export async function startDeepResearch(
+  input: string, depth: Depth, num_researchers: number
+): Promise<{ session_id: string }> {
+  return fetchJSON('/api/deepresearch', {
+    method: 'POST',
+    body: JSON.stringify({ input, depth, num_researchers }),
+  })
+}
+
+export async function getDeepSession(sessionId: string): Promise<DeepResearchSession> {
+  return fetchJSON<DeepResearchSession>(`/api/deepresearch/${sessionId}`)
+}
+
+export async function listDeepSessions(limit = 20): Promise<SessionSummary[]> {
+  return fetchJSON<SessionSummary[]>(`/api/deepresearches?limit=${limit}`)
+}
+
+export function streamDeepSession(sessionId: string, onEvent: (e: SSEEvent) => void): () => void {
+  return _streamGeneric(`/api/deepresearch/${sessionId}/stream`, onEvent)
+}
+
+// ---------------------------------------------------------------------------
+// AutoResearch API
+// ---------------------------------------------------------------------------
+
+export async function startAutoResearch(
+  input: string, depth: Depth, max_iterations: number
+): Promise<{ session_id: string }> {
+  return fetchJSON('/api/autoresearch', {
+    method: 'POST',
+    body: JSON.stringify({ input, depth, max_iterations }),
+  })
+}
+
+export async function getAutoSession(sessionId: string): Promise<AutoResearchSession> {
+  return fetchJSON<AutoResearchSession>(`/api/autoresearch/${sessionId}`)
+}
+
+export async function listAutoSessions(limit = 20): Promise<SessionSummary[]> {
+  return fetchJSON<SessionSummary[]>(`/api/autoresearches?limit=${limit}`)
+}
+
+export function streamAutoSession(sessionId: string, onEvent: (e: SSEEvent) => void): () => void {
+  return _streamGeneric(`/api/autoresearch/${sessionId}/stream`, onEvent)
+}
+
+// ---------------------------------------------------------------------------
+// Literature Review API
+// ---------------------------------------------------------------------------
+
+export async function startLitReview(input: string, depth: Depth): Promise<{ session_id: string }> {
+  return fetchJSON('/api/lit', {
+    method: 'POST',
+    body: JSON.stringify({ input, depth }),
+  })
+}
+
+export async function getLitSession(sessionId: string): Promise<LitSession> {
+  return fetchJSON<LitSession>(`/api/lit/${sessionId}`)
+}
+
+export async function listLitSessions(limit = 20): Promise<SessionSummary[]> {
+  return fetchJSON<SessionSummary[]>(`/api/lits?limit=${limit}`)
+}
+
+export function streamLitSession(sessionId: string, onEvent: (e: SSEEvent) => void): () => void {
+  return _streamGeneric(`/api/lit/${sessionId}/stream`, onEvent)
+}
+
+// ---------------------------------------------------------------------------
+// Compare API
+// ---------------------------------------------------------------------------
+
+export async function compareItems(items: string[], context?: string): Promise<CompareResult> {
+  return fetchJSON<CompareResult>('/api/compare', {
+    method: 'POST',
+    body: JSON.stringify({ items, context: context ?? '' }),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Draft API
+// ---------------------------------------------------------------------------
+
+export async function createDraft(
+  session_id: string, session_type: string, format: DraftFormat, title?: string
+): Promise<DraftResult> {
+  return fetchJSON<DraftResult>('/api/draft', {
+    method: 'POST',
+    body: JSON.stringify({ session_id, session_type, format, title: title ?? '' }),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Outputs / Artifacts API
+// ---------------------------------------------------------------------------
+
+export async function listAllOutputs(): Promise<SessionArtifacts[]> {
+  return fetchJSON<SessionArtifacts[]>('/api/outputs')
+}
+
+export async function listSessionOutputs(sessionId: string): Promise<SessionArtifacts> {
+  return fetchJSON<SessionArtifacts>(`/api/outputs/${sessionId}`)
+}
+
+export function getArtifactDownloadUrl(sessionId: string, filename: string): string {
+  return `${API_BASE_URL}/api/outputs/${sessionId}/${filename}`
+}
+
+// ---------------------------------------------------------------------------
+// Knowledge search API
+// ---------------------------------------------------------------------------
+
+export async function searchKnowledge(query: string, limit = 20): Promise<KnowledgePaper[]> {
+  return fetchJSON<KnowledgePaper[]>(`/api/knowledge/search?q=${encodeURIComponent(query)}&limit=${limit}`)
+}
+
+export async function getKnowledgeStats(): Promise<KnowledgeStats> {
+  return fetchJSON<KnowledgeStats>('/api/knowledge/stats')
+}
+
+// ---------------------------------------------------------------------------
+// Internal SSE helper
+// ---------------------------------------------------------------------------
+
+function _streamGeneric(path: string, onEvent: (e: SSEEvent) => void): () => void {
+  const es = new EventSource(`${API_BASE_URL}${path}`)
   es.addEventListener('progress', (e: MessageEvent) => {
     try { onEvent(JSON.parse(e.data as string)) } catch {}
   })

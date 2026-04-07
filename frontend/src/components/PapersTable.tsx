@@ -20,12 +20,17 @@ import {
   ChevronRight,
   Search,
   FileText,
+  BookOpen,
+  ScanText,
+  Sparkles,
+  CheckCircle2,
+  XCircle,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn, formatAuthors, formatCitationCount, getRelevanceColor, truncateText } from '@/lib/utils'
-import type { Paper } from '@/lib/types'
+import type { Paper, PaperSource, ReadStatus } from '@/lib/types'
 
 const columnHelper = createColumnHelper<Paper>()
 
@@ -55,6 +60,41 @@ function RelevanceBar({ score }: { score: number }) {
   )
 }
 
+const SOURCE_CONFIG: Record<PaperSource, { label: string; className: string }> = {
+  arxiv:            { label: 'arXiv',    className: 'bg-violet-900/40 text-violet-300 border-violet-700/50' },
+  semantic_scholar: { label: 'S2',       className: 'bg-blue-900/40  text-blue-300  border-blue-700/50'    },
+  web:              { label: 'Web',      className: 'bg-slate-700/40 text-slate-400 border-slate-600/50'   },
+  crossref:         { label: 'CrossRef', className: 'bg-green-900/40 text-green-300 border-green-700/50'   },
+}
+
+function SourceBadge({ source }: { source: PaperSource | null }) {
+  if (!source) return null
+  const cfg = SOURCE_CONFIG[source]
+  return (
+    <span className={cn('inline-block rounded border px-1.5 py-px text-[10px] font-mono font-semibold leading-none', cfg.className)}>
+      {cfg.label}
+    </span>
+  )
+}
+
+const READ_STATUS_CONFIG: Record<ReadStatus, { label: string; Icon: React.ElementType; className: string }> = {
+  full_text:      { label: 'Full text',  Icon: BookOpen,  className: 'text-emerald-400' },
+  abstract_only:  { label: 'Abstract',   Icon: ScanText,  className: 'text-amber-400'   },
+  inferred:       { label: 'Inferred',   Icon: Sparkles,  className: 'text-slate-500'   },
+}
+
+function ReadStatusBadge({ status }: { status: ReadStatus | null }) {
+  if (!status) return null
+  const cfg = READ_STATUS_CONFIG[status]
+  const Icon = cfg.Icon
+  return (
+    <span className={cn('flex items-center gap-1 text-[10px] font-medium', cfg.className)} title={cfg.label}>
+      <Icon className="h-3 w-3 flex-shrink-0" />
+      <span className="hidden sm:inline">{cfg.label}</span>
+    </span>
+  )
+}
+
 function ExpandedRow({ paper }: { paper: Paper }) {
   return (
     <div className="px-4 py-4 space-y-4 bg-slate-950/50 border-t border-slate-800">
@@ -70,7 +110,15 @@ function ExpandedRow({ paper }: { paper: Paper }) {
         </h4>
         <p className="text-sm text-indigo-300 leading-relaxed">{paper.relevance_reason}</p>
       </div>
-      <div className="flex items-center gap-4 text-xs text-slate-500 font-mono">
+      {paper.venue && (
+        <div>
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">
+            Venue
+          </h4>
+          <p className="text-sm text-slate-300">{paper.venue}</p>
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500 font-mono">
         {paper.arxiv_id && (
           <span>arXiv: {paper.arxiv_id}</span>
         )}
@@ -122,7 +170,7 @@ export default function PapersTable({ papers }: PapersTableProps) {
         cell: ({ getValue, row }) => {
           const paper = row.original
           return (
-            <div className="space-y-0.5">
+            <div className="space-y-1">
               <a
                 href={paper.url}
                 target="_blank"
@@ -133,6 +181,19 @@ export default function PapersTable({ papers }: PapersTableProps) {
                 <span className="line-clamp-2">{getValue()}</span>
                 <ExternalLink className="mt-0.5 h-3 w-3 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
               </a>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <SourceBadge source={paper.source} />
+                {paper.url_verified === true && (
+                  <span title="URL verified" className="flex items-center gap-0.5 text-[10px] text-emerald-500">
+                    <CheckCircle2 className="h-3 w-3" />
+                  </span>
+                )}
+                {paper.url_verified === false && (
+                  <span title="URL unreachable" className="flex items-center gap-0.5 text-[10px] text-red-500">
+                    <XCircle className="h-3 w-3" />
+                  </span>
+                )}
+              </div>
             </div>
           )
         },
@@ -170,6 +231,13 @@ export default function PapersTable({ papers }: PapersTableProps) {
           </span>
         ),
         sortDescFirst: true,
+      }),
+      // Read status
+      columnHelper.accessor('read_status', {
+        header: 'Read',
+        size: 100,
+        cell: ({ getValue }) => <ReadStatusBadge status={getValue()} />,
+        enableSorting: false,
       }),
       // Tags
       columnHelper.accessor('tags', {

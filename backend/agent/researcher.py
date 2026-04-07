@@ -20,6 +20,8 @@ import openai
 from ..models.schemas import CitationLink, Paper, ResearchResult, RoadmapStep
 from ..storage.session_store import session_store
 from ..storage.graph_store import graph_store
+from ..storage import db as _db
+from ..storage.artifact_store import save_research_artifacts
 from .tools import TOOL_SPECS, execute_tool
 
 logger = logging.getLogger(__name__)
@@ -41,16 +43,23 @@ You have access to tools for:
 - analysis: extract_claims, extract_methodology, extract_results, extract_limitations, compare_papers, find_gaps, timeline_topic, citation_check, quality_review, compact_context
 - synthesis/planning: plan_research, generate_report, build_reading_list, build_implementation_plan, generate_bibliography
 - memory/state: save_note, get_notes, paper_catalog_upsert, cache_store, cache_lookup, source_coverage, budget_status
+- cross-session: search_session_memory (searches papers from ALL prior research sessions — call this FIRST to find known sources before searching APIs)
 
 Be thorough but efficient. For "quick" depth: 5-8 papers, 3-6 tool calls. For "standard": 10-15 papers, 6-12 tool calls. For "deep": 20+ papers, 12-20 tool calls.
 
 Prefer this workflow:
-1. plan_research or resolve_paper_id
-2. search_papers plus one source-specific search
+1. search_session_memory to check what was already researched in prior sessions
+2. plan_research or resolve_paper_id
+3. search_papers plus one source-specific search (skip sources already covered by memory)
 3. get_paper_metadata / references / citations for the strongest papers
 4. analysis tools on the best paper texts/abstracts
 5. source_coverage or budget_status if you are unsure whether to continue
 6. final synthesis into the required JSON
+
+For provenance, set these fields per paper:
+- "source": one of "arxiv", "semantic_scholar", "web", "crossref" — whichever API returned this paper
+- "read_status": "full_text" if you fetched the full paper/PDF, "abstract_only" if you only read the abstract, "inferred" if you derived it from references or metadata without reading it directly
+- "venue": conference or journal name if known (e.g. "NeurIPS 2023", "ICML 2024", "Nature", null if unknown)
 
 At the end, you MUST return a JSON object with this exact structure (and nothing else after it):
 {
@@ -68,7 +77,10 @@ At the end, you MUST return a JSON object with this exact structure (and nothing
       "relevance_score": 0.95,
       "relevance_reason": "Why this paper is relevant",
       "citation_count": 150,
-      "tags": ["cs.LG", "cs.AI"]
+      "tags": ["cs.LG", "cs.AI"],
+      "source": "arxiv",
+      "read_status": "full_text",
+      "venue": "NeurIPS 2023"
     }
   ],
   "citation_links": [{"source": "paper_id_1", "target": "paper_id_2"}],
@@ -124,6 +136,10 @@ def parse_result(data: dict, session_id: str) -> ResearchResult:
         try:
             score = _coerce_float(raw.get("relevance_score"), 0.5)
             score = max(0.0, min(1.0, score))
+            valid_sources = {"arxiv", "semantic_scholar", "web", "crossref"}
+            valid_read_statuses = {"full_text", "abstract_only", "inferred"}
+            raw_source = _coerce_str(raw.get("source")).lower() or None
+            raw_read_status = _coerce_str(raw.get("read_status")).lower() or None
             paper = Paper(
                 id=_coerce_str(raw.get("id"), f"paper_{len(papers)}"),
                 title=_coerce_str(raw.get("title"), "Untitled"),
@@ -137,6 +153,9 @@ def parse_result(data: dict, session_id: str) -> ResearchResult:
                 relevance_reason=_coerce_str(raw.get("relevance_reason")),
                 citation_count=_coerce_int(raw.get("citation_count")),
                 tags=_coerce_list_of_str(raw.get("tags")),
+                source=raw_source if raw_source in valid_sources else None,  # type: ignore[arg-type]
+                read_status=raw_read_status if raw_read_status in valid_read_statuses else None,  # type: ignore[arg-type]
+                venue=_coerce_str(raw.get("venue")) or None,
             )
             papers.append(paper)
         except Exception as exc:
@@ -325,11 +344,43 @@ async def run_research(
         except Exception as exc:
             logger.warning("Global graph population failed (non-fatal): %s", exc)
 
+    async def _verify_urls(papers: list) -> None:
+        """HTTP HEAD-check every paper URL; mark url_verified on each Paper in-place."""
+        sem = asyncio.Semaphore(10)
+
+        async def _check(paper) -> None:
+            url = paper.url
+            if not url:
+                paper.url_verified = False
+                return
+            async with sem:
+                try:
+                    async with __import__("httpx").AsyncClient(
+                        timeout=6.0, follow_redirects=True
+                    ) as client:
+                        resp = await client.head(url)
+                        paper.url_verified = resp.status_code < 400
+                except Exception:
+                    paper.url_verified = False
+
+        await asyncio.gather(*[_check(p) for p in papers], return_exceptions=True)
+        bad = [p.title for p in papers if p.url_verified is False]
+        if bad:
+            await session_store.add_log(
+                session_id,
+                f"URL check: {len(papers) - len(bad)}/{len(papers)} links live. Dead: {', '.join(bad[:3])}{'…' if len(bad) > 3 else ''}",
+                "warning",
+            )
+        else:
+            await session_store.add_log(session_id, f"URL check: all {len(papers)} links verified.", "success")
+
     async def _finalise(result_text: str) -> bool:
         """Parse JSON, update session, return True on success."""
         result_data = _extract_json(result_text)
         if result_data is not None:
             result = parse_result(result_data, session_id)
+            await session_store.add_log(session_id, "Verifying source URLs…", "info")
+            await _verify_urls(result.papers)
             session = session_store.get_session(session_id)
             if session is not None:
                 session.result = result
@@ -339,6 +390,21 @@ async def run_research(
             await session_store.add_log(session_id, "Research complete!", "success")
             await _populate_graph(result)
             await _populate_global_graph(result)
+            # Persist papers to cross-session memory
+            try:
+                await _db.save_papers_memory(
+                    [p.model_dump() for p in result.papers], session_id
+                )
+            except Exception as exc:
+                logger.warning("save_papers_memory failed (non-fatal): %s", exc)
+            # Save artifacts to disk
+            try:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(
+                    None, save_research_artifacts, session_id, result_data, "research"
+                )
+            except Exception as exc:
+                logger.warning("save_research_artifacts failed (non-fatal): %s", exc)
             return True
         logger.warning("No JSON found in final response for session %s", session_id)
         await session_store.add_log(
