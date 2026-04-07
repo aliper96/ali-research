@@ -1,0 +1,171 @@
+[
+  {
+    "id": "semantic_scholar_ad0c4fbafafb7f2fe94cc3720113077be2f17c3e",
+    "title": "Generative Lifting of Multiview to 3D from Unknown Pose: Wrapping NeRF inside Diffusion",
+    "authors": [
+      "Xin Yuan",
+      "Rana Hanocka",
+      "Michael Maire"
+    ],
+    "year": 2024,
+    "abstract": "We cast multiview reconstruction from unknown pose as a generative modeling problem. From a collection of unannotated 2D images of a scene, our approach simultaneously learns both a network to predict camera pose from 2D image input, as well as the parameters of a Neural Radiance Field (NeRF) for the 3D scene. To drive learning, we wrap both the pose prediction network and NeRF inside a Denoising Diffusion Probabilistic Model (DDPM) and train the system via the standard denoising objective. Our framework requires the system accomplish the task of denoising an input 2D image by predicting its pose and rendering the NeRF from that pose. Learning to denoise thus forces the system to concurrently learn the underlying 3D NeRF representation and a mapping from images to camera extrinsic parameters.",
+    "url": "https://www.semanticscholar.org/paper/ad0c4fbafafb7f2fe94cc3720113077be2f17c3e",
+    "arxiv_id": "2406.06972",
+    "doi": "10.48550/arXiv.2406.06972",
+    "relevance_score": 0.93,
+    "relevance_reason": "Directly targets the “image(s) -> 3D scene” setting but with unknown camera pose; uses diffusion as a training objective to jointly learn pose and NeRF, addressing core ambiguity in image-to-3D lifting.",
+    "citation_count": 0,
+    "tags": [
+      "arXiv.org",
+      "3D reconstruction",
+      "NeRF",
+      "diffusion"
+    ],
+    "source": "semantic_scholar",
+    "read_status": "abstract_only",
+    "venue": null
+  },
+  {
+    "id": "semantic_scholar_d7cffb13dc787cd5bca894a65bb3815dae2d5e74",
+    "title": "Deceptive-NeRF/3DGS: Diffusion-Generated Pseudo-observations for High-Quality Sparse-View Reconstruction",
+    "authors": [
+      "Xinhang Liu",
+      "Shiu-hong Kao",
+      "Jiaben Chen",
+      "Yu-Wing Tai",
+      "Chi-Keung Tang"
+    ],
+    "year": 2023,
+    "abstract": "Novel view synthesis via NeRFs or 3D Gaussian Splatting (3DGS) typically necessitates dense observations with hundreds of input images to circumvent artifacts. We introduce Deceptive-NeRF/3DGS to enhance sparse-view reconstruction with only a limited set of input images, by leveraging a diffusion model pre-trained from multiview datasets. Different from using diffusion priors to regularize representation optimization, our method directly uses diffusion-generated images to train NeRF/3DGS as if they were real input views. Specifically, we propose a deceptive diffusion model turning noisy images rendered from few-view reconstructions into high-quality photorealistic pseudo-observations. To resolve consistency among pseudo-observations and real input views, we develop an uncertainty measure to guide the diffusion model's generation. Our system progressively incorporates diffusion-generated pseudo-observations into the training image sets, ultimately densifying the sparse input observations by 5 to 10 times.",
+    "url": "https://www.semanticscholar.org/paper/d7cffb13dc787cd5bca894a65bb3815dae2d5e74",
+    "arxiv_id": "2305.15171",
+    "doi": "10.1007/978-3-031-72640-8_19",
+    "relevance_score": 0.88,
+    "relevance_reason": "A strong example of the “image-to-3D” line for sparse inputs, using diffusion-generated pseudo views to reconstruct NeRF/3DGS with fewer images (closely related to single-image constraints).",
+    "citation_count": 33,
+    "tags": [
+      "European Conference on Computer Vision",
+      "NeRF",
+      "3DGS",
+      "diffusion"
+    ],
+    "source": "semantic_scholar",
+    "read_status": "abstract_only",
+    "venue": "European Conference on Computer Vision"
+  },
+  {
+    "id": "semantic_scholar_071c61e03737de1297c07d6bae6aa9c8a2a669c7",
+    "title": "Inpaint3D: 3D Scene Content Generation using 2D Inpainting Diffusion",
+    "authors": [
+      "Kira Prabhu",
+      "Jane Wu",
+      "Lynn Tsai",
+      "Peter Hedman",
+      "Dan B Goldman",
+      "Ben Poole",
+      "Michael Broxton"
+    ],
+    "year": 2023,
+    "abstract": "This paper presents a novel approach to inpainting 3D regions of a scene, given masked multi-view images, by distilling a 2D diffusion model into a learned 3D scene representation (e.g. a NeRF). Unlike 3D generative methods that explicitly condition the diffusion model on camera pose or multi-view information, our diffusion model is conditioned only on a single masked 2D image. Nevertheless, we show that this 2D diffusion model can still serve as a generative prior in a 3D multi-view reconstruction problem where we optimize a NeRF using a combination of score distillation sampling and NeRF reconstruction losses. Predicted depth is used as additional supervision to encourage accurate geometry.",
+    "url": "https://www.semanticscholar.org/paper/071c61e03737de1297c07d6bae6aa9c8a2a669c7",
+    "arxiv_id": "2312.03869",
+    "doi": "10.48550/arXiv.2312.03869",
+    "relevance_score": 0.82,
+    "relevance_reason": "Shows how a single 2D diffusion prior can be used to generate/complete 3D content via NeRF optimization—relevant to image-to-3D world completion and unobserved regions.",
+    "citation_count": 12,
+    "tags": [
+      "arXiv.org",
+      "NeRF",
+      "diffusion",
+      "3D inpainting"
+    ],
+    "source": "semantic_scholar",
+    "read_status": "abstract_only",
+    "venue": null
+  },
+  {
+    "id": "semantic_scholar_213a14d426acebf2f04709eea722a887a1f5f051",
+    "title": "Text2NeRF: Text-Driven 3D Scene Generation With Neural Radiance Fields",
+    "authors": [
+      "Jingbo Zhang",
+      "Xiaoyu Li",
+      "Ziyu Wan",
+      "Can Wang",
+      "Jing Liao"
+    ],
+    "year": 2023,
+    "abstract": "Text-driven 3D scene generation is widely applicable to video gaming, film industry, and metaverse applications that have a large demand for 3D scenes. However, existing text-to-3D generation methods are limited to producing 3D objects with simple geometries and dreamlike styles that lack realism. In this work, we present Text2NeRF, which is able to generate a wide range of 3D scenes with complicated geometric structures and high-fidelity textures purely from a text prompt. To this end, we adopt NeRF as the 3D representation and leverage a pre-trained text-to-image diffusion model to constrain the 3D reconstruction of the NeRF to reflect the scene description. Specifically, we employ the diffusion model to infer the text-related image as the content prior and use a monocular depth estimation method to offer the geometric prior. Both content and geometric priors are utilized to update the NeRF model. To guarantee textured and geometric consistency between different views, we introduce a progressive scene inpainting and updating strategy for novel view synthesis of the scene.",
+    "url": "https://www.semanticscholar.org/paper/213a14d426acebf2f04709eea722a887a1f5f051",
+    "arxiv_id": "2305.11588",
+    "doi": "10.1109/TVCG.2024.3361502",
+    "relevance_score": 0.74,
+    "relevance_reason": "Not image-only (text-driven), but it is directly in the “produce a navigable 3D scene” direction using NeRF + diffusion guidance and view-consistency via inpainting/updating—conceptually adjacent to image-to-3D world generation.",
+    "citation_count": 138,
+    "tags": [
+      "Text2NeRF",
+      "NeRF",
+      "diffusion",
+      "3D scene generation"
+    ],
+    "source": "semantic_scholar",
+    "read_status": "abstract_only",
+    "venue": "IEEE Transactions on Visualization and Computer Graphics"
+  },
+  {
+    "id": "google_scholar_Zou_Triplane_Meets_Gaussian_Splatting_2024",
+    "title": "Triplane meets gaussian splatting: Fast and generalizable single-view 3D reconstruction with transformers",
+    "authors": [
+      "ZX Zou",
+      "Z Yu",
+      "YC Guo",
+      "Y Li",
+      "D Liang"
+    ],
+    "year": 2024,
+    "abstract": "We propose a method that enables fast reconstruction from a single-view image. We build the 3D representation upon a hybrid Triplane-Gaussian representation by evaluating a ...",
+    "url": "http://openaccess.thecvf.com/content/CVPR2024/html/Zou_Triplane_Meets_Gaussian_Splatting_Fast_and_Generalizable_Single-View_3D_Reconstruction_CVPR_2024_paper.html",
+    "arxiv_id": null,
+    "doi": null,
+    "relevance_score": 0.7,
+    "relevance_reason": "Single-view image-to-3D reconstruction using a transformer and a Gaussian splatting-based representation; highly relevant to the single-image setting implied by “image to 3D world.”",
+    "citation_count": 335,
+    "tags": [
+      "single-view",
+      "3D Gaussian splatting",
+      "transformers",
+      "CVPR 2024"
+    ],
+    "source": "web",
+    "read_status": "inferred",
+    "venue": "CVPR 2024"
+  },
+  {
+    "id": "semantic_scholar_35b94ed29ed0e4627be9799e01873e91b1bba34f",
+    "title": "3D Scene Generation: A Survey",
+    "authors": [
+      "Beichen Wen",
+      "Haozhe Xie",
+      "Zhaoxi Chen",
+      "Fangzhou Hong",
+      "Ziwei Liu"
+    ],
+    "year": 2025,
+    "abstract": "3D scene generation seeks to synthesize spatially structured, semantically meaningful, and photorealistic environments. This survey provides an overview of state-of-the-art approaches, organizing them into four paradigms: procedural generation, neural 3D-based generation, image-based generation, and video-based generation. It analyzes technical foundations, trade-offs, evaluation protocols, and downstream applications, and highlights promising directions such as higher fidelity, physics-aware and interactive generation, and unified perception-generation models.",
+    "url": "https://www.semanticscholar.org/paper/35b94ed29ed0e4627be9799e01873e91b1bba34f",
+    "arxiv_id": "2505.05474",
+    "doi": "10.48550/arXiv.2505.05474",
+    "relevance_score": 0.63,
+    "relevance_reason": "Survey-level coverage to contextualize image-to-3D world approaches (NeRF/3DGS, diffusion/video/implicit 3D generation paradigms) and to identify evaluation and challenge areas.",
+    "citation_count": 24,
+    "tags": [
+      "survey",
+      "3D scene generation",
+      "NeRF",
+      "3DGS",
+      "diffusion"
+    ],
+    "source": "semantic_scholar",
+    "read_status": "abstract_only",
+    "venue": null
+  }
+]

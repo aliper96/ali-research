@@ -4,6 +4,7 @@ import { ExternalLink, CheckCircle2, XCircle, AlertCircle, HelpCircle, GitBranch
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import type { AuditClaim, AuditClaimStatus, AuditResult, AuditVerdict } from '@/lib/types'
+import MarkdownContent from '@/components/MarkdownContent'
 
 const VERDICT_CONFIG: Record<AuditVerdict, { label: string; className: string }> = {
   matches:        { label: 'Claims Match',    className: 'bg-emerald-900/40 text-emerald-300 border-emerald-700' },
@@ -107,9 +108,9 @@ export default function AuditReport({ result }: { result: AuditResult }) {
           </div>
 
           {result.audit_notes && (
-            <p className="text-sm text-slate-400 leading-relaxed border-t border-slate-800 pt-3">
-              {result.audit_notes}
-            </p>
+            <div className="border-t border-slate-800 pt-3">
+              <MarkdownContent className="[&_p]:text-slate-400">{result.audit_notes}</MarkdownContent>
+            </div>
           )}
         </CardContent>
       </Card>

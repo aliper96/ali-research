@@ -1,15 +1,15 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { FileText, Loader2, Download } from 'lucide-react'
 import Link from 'next/link'
+import MarkdownContent from '@/components/MarkdownContent'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { createDraft, listSessions, listDeepSessions, listLitSessions } from '@/lib/api'
 import type { SessionSummary } from '@/lib/api'
 import type { DraftFormat, DraftResult } from '@/lib/types'
-import { useEffect } from 'react'
 
 const FORMAT_OPTIONS: { value: DraftFormat; label: string; desc: string }[] = [
   { value: 'brief',  label: 'Executive Brief',  desc: '1-2 pages, key findings + actions' },
@@ -199,9 +199,9 @@ export default function DraftPage() {
             </div>
             <Card className="border-slate-800 bg-slate-900/50">
               <CardContent className="pt-4">
-                <pre className="whitespace-pre-wrap text-sm text-slate-300 font-mono leading-relaxed max-h-[60vh] overflow-y-auto">
+                <MarkdownContent className="max-h-[60vh] overflow-y-auto">
                   {result.content}
-                </pre>
+                </MarkdownContent>
               </CardContent>
             </Card>
           </div>

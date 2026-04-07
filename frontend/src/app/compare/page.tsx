@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { compareItems } from '@/lib/api'
 import type { CompareResult } from '@/lib/types'
+import MarkdownContent from '@/components/MarkdownContent'
 
 export default function ComparePage() {
   const [items, setItems]       = useState<string[]>(['', ''])
@@ -123,9 +124,11 @@ function CompareMatrix({ result }: { result: CompareResult }) {
       {/* Summary */}
       <Card className="border-slate-800 bg-slate-900/50">
         <CardContent className="pt-4 space-y-2">
-          <p className="text-sm text-slate-300">{result.summary}</p>
+          <MarkdownContent>{result.summary}</MarkdownContent>
           {result.recommendation && (
-            <p className="text-xs text-cyan-400 font-medium">{result.recommendation}</p>
+            <MarkdownContent className="[&_p]:text-cyan-400 [&_p]:text-xs [&_p]:font-medium">
+              {result.recommendation}
+            </MarkdownContent>
           )}
         </CardContent>
       </Card>

@@ -9,6 +9,7 @@ import {
 import Link from 'next/link'
 import { getReviewSession, streamReview, type ReviewSession, type ReviewerReport, type EditorReport } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import MarkdownContent from '@/components/MarkdownContent'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -121,7 +122,7 @@ function ReviewerCard({ report, index }: { report: ReviewerReport; index: number
         <div className="border-t border-slate-800 px-5 py-5 space-y-5">
           {/* Summary */}
           {report.summary && (
-            <p className="text-sm text-slate-300 leading-relaxed">{report.summary}</p>
+            <MarkdownContent>{report.summary}</MarkdownContent>
           )}
 
           {/* Scores */}
@@ -226,9 +227,9 @@ function EditorVerdict({ report }: { report: EditorReport }) {
 
       {/* Summary */}
       {report.consensus_summary && (
-        <p className="text-sm text-slate-300 leading-relaxed border-l-2 border-violet-700/50 pl-4">
-          {report.consensus_summary}
-        </p>
+        <div className="border-l-2 border-violet-700/50 pl-4">
+          <MarkdownContent>{report.consensus_summary}</MarkdownContent>
+        </div>
       )}
 
       {/* Score overview */}

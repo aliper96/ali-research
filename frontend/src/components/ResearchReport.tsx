@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import PapersTable from '@/components/PapersTable'
 import CitationNetwork from '@/components/CitationNetwork'
+import MarkdownContent from '@/components/MarkdownContent'
 import type { ResearchResult, Difficulty } from '@/lib/types'
 
 interface ResearchReportProps {
@@ -42,35 +43,6 @@ const DIFFICULTY_COLORS: Record<Difficulty, string> = {
   hard: 'border-l-red-500',
 }
 
-/** Render a small subset of Markdown: ***bold-italic***, **bold**, *italic*, and double-newline paragraphs. */
-function renderMarkdown(text: string): React.ReactNode {
-  // Split on blank lines to get paragraphs
-  const paragraphs = text.split(/\n{2,}/)
-  return paragraphs.map((para, pi) => {
-    // Tokenise inline: ***…***, **…**, *…*
-    const parts: React.ReactNode[] = []
-    const re = /(\*{3}(.+?)\*{3}|\*{2}(.+?)\*{2}|\*(.+?)\*)/g
-    let last = 0
-    let m: RegExpExecArray | null
-    while ((m = re.exec(para)) !== null) {
-      if (m.index > last) parts.push(para.slice(last, m.index))
-      if (m[0].startsWith('***')) {
-        parts.push(<strong key={m.index}><em>{m[2]}</em></strong>)
-      } else if (m[0].startsWith('**')) {
-        parts.push(<strong key={m.index}>{m[3]}</strong>)
-      } else {
-        parts.push(<em key={m.index}>{m[4]}</em>)
-      }
-      last = m.index + m[0].length
-    }
-    if (last < para.length) parts.push(para.slice(last))
-    return (
-      <p key={pi} className={pi > 0 ? 'mt-4' : ''}>
-        {parts}
-      </p>
-    )
-  })
-}
 
 function OverviewTab({ result }: { result: ResearchResult }) {
   return (
@@ -80,8 +52,8 @@ function OverviewTab({ result }: { result: ResearchResult }) {
         <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-4">
           Research Summary
         </h3>
-        <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-5 text-sm text-slate-300 leading-7">
-          {renderMarkdown(result.summary)}
+        <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-5">
+          <MarkdownContent>{result.summary}</MarkdownContent>
         </div>
       </div>
 
