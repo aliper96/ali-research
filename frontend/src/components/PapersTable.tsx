@@ -63,6 +63,7 @@ function RelevanceBar({ score }: { score: number }) {
 const SOURCE_CONFIG: Record<PaperSource, { label: string; className: string }> = {
   arxiv:            { label: 'arXiv',    className: 'bg-violet-900/40 text-violet-300 border-violet-700/50' },
   semantic_scholar: { label: 'S2',       className: 'bg-blue-900/40  text-blue-300  border-blue-700/50'    },
+  google_scholar:   { label: 'Scholar',  className: 'bg-amber-900/40 text-amber-300 border-amber-700/50'   },
   web:              { label: 'Web',      className: 'bg-slate-700/40 text-slate-400 border-slate-600/50'   },
   crossref:         { label: 'CrossRef', className: 'bg-green-900/40 text-green-300 border-green-700/50'   },
 }

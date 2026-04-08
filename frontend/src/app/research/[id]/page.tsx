@@ -258,7 +258,11 @@ export default function ResearchPage({ params }: ResearchPageProps) {
 
         {/* Completed state with results */}
         {session?.status === 'completed' && session.result && (
-          <ResearchReport result={session.result} sessionId={sessionId} />
+          <ResearchReport
+            result={session.result}
+            sessionId={sessionId}
+            topic={session.input}
+          />
         )}
 
         {/* Completed but no result (edge case) */}

@@ -54,6 +54,47 @@ def _normalize_title(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).strip()
 
 
+def _coerce_year(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    match = re.search(r"\b(19|20)\d{2}\b", text)
+    if match:
+        try:
+            return int(match.group(0))
+        except ValueError:
+            return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+def _coerce_citation_count(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    text = str(value).strip().replace(",", "")
+    if not text:
+        return 0
+    match = re.search(r"\d+", text)
+    if match:
+        try:
+            return int(match.group(0))
+        except ValueError:
+            return 0
+    return 0
+
+
 def _extract_arxiv_id(value: str) -> str | None:
     if not value:
         return None
@@ -429,12 +470,12 @@ async def search_google_scholar(query: str, max_results: int = 8) -> list[dict[s
                     "id": pub.get("author_id", [bib.get("title", "")])[0] if pub.get("author_id") else bib.get("title", ""),
                     "title": bib.get("title", ""),
                     "authors": bib.get("author", []) if isinstance(bib.get("author"), list) else [bib.get("author", "")],
-                    "year": bib.get("pub_year"),
+                    "year": _coerce_year(bib.get("pub_year")),
                     "abstract": bib.get("abstract", ""),
                     "url": pub.get("pub_url") or pub.get("eprint_url", ""),
                     "arxiv_id": None,
                     "doi": None,
-                    "citation_count": pub.get("num_citations", 0),
+                    "citation_count": _coerce_citation_count(pub.get("num_citations", 0)),
                     "tags": [],
                     "venue": bib.get("venue", ""),
                     "source": "google_scholar",
@@ -549,17 +590,24 @@ async def resolve_paper_id(identifier: str) -> dict[str, Any]:
 
 
 async def search_papers(query: str, max_results: int = 12) -> list[dict[str, Any]]:
-    arxiv_results, s2_results = await asyncio.gather(
+    arxiv_results, s2_results, scholar_results = await asyncio.gather(
         search_arxiv(query, max_results=max_results),
         search_semantic_scholar(query, max_results=max_results),
+        search_google_scholar(query, max_results=max_results),
         return_exceptions=True,
     )
     papers: list[dict[str, Any]] = []
-    for result in (arxiv_results, s2_results):
+    for result in (arxiv_results, s2_results, scholar_results):
         if isinstance(result, list):
             papers.extend(result)
     deduped = _dedupe_papers(papers)
-    deduped.sort(key=lambda paper: (paper.get("citation_count", 0), paper.get("year") or 0), reverse=True)
+    deduped.sort(
+        key=lambda paper: (
+            _coerce_citation_count(paper.get("citation_count")),
+            _coerce_year(paper.get("year")) or 0,
+        ),
+        reverse=True,
+    )
     return deduped[:max_results]
 
 

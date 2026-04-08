@@ -50,6 +50,14 @@ Your parent research question is: {parent_topic}
 
 Search for papers, extract key findings, and return a JSON report. Be focused — only cover your assigned subtopic.
 
+Minimum workflow expectations:
+- Start with search_session_memory when useful.
+- Use search_papers AND search_google_scholar for coverage.
+- Use at least one source-specific retrieval step for the strongest papers.
+- For the most important papers, fetch metadata/citations and parse_pdf whenever you can access a PDF or arXiv paper.
+- In deep mode, aim for at least 6 solid papers for your subtopic, and avoid relying mostly on inferred entries.
+- Do not write broad conceptual summaries unless they are grounded in papers you actually inspected.
+
 Provenance rules: set source, read_status, venue per paper.
 
 Return ONLY this JSON:
@@ -176,6 +184,7 @@ async def _run_researcher(
     subtopic: str,
     parent_topic: str,
     session_id: str,
+    depth: str,
     max_tool_calls: int,
 ) -> SubResearchResult:
     sub = SubResearchResult(subtopic=subtopic, researcher_id=researcher_id, status="running")
@@ -189,7 +198,9 @@ async def _run_researcher(
         {"role": "system", "content": system},
         {"role": "user", "content":
             f"Research this subtopic thoroughly: {subtopic}\n"
-            f"Context: part of a larger investigation into '{parent_topic}'"},
+            f"Context: part of a larger investigation into '{parent_topic}'\n"
+            f"Depth: {depth}\n"
+            "Be evidence-first. Prefer papers you actually read over inferred citations."},
     ]
     try:
         text = await _tool_loop(client, messages, max_tool_calls, _log)
@@ -337,7 +348,7 @@ async def run_deep_research(
     num_researchers: int = 3,
 ) -> None:
     client = _make_client()
-    max_calls_per_researcher = {"standard": 8, "deep": 12}.get(depth, 10)
+    max_calls_per_researcher = {"standard": 10, "deep": 18}.get(depth, 12)
 
     await deep_store.add_log(session_id, f"Deep research started: {user_input}", "info")
     await deep_store.set_progress(session_id, 5)
@@ -358,7 +369,7 @@ async def run_deep_research(
         # Stage 2 — parallel researchers
         await deep_store.add_log(session_id, f"Launching {num_researchers} parallel researchers…", "info")
         tasks = [
-            _run_researcher(client, i + 1, subtopic, user_input, session_id, max_calls_per_researcher)
+            _run_researcher(client, i + 1, subtopic, user_input, session_id, depth, max_calls_per_researcher)
             for i, subtopic in enumerate(subtopics)
         ]
         researchers: list[SubResearchResult] = await asyncio.gather(*tasks)

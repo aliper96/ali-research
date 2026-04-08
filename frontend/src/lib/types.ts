@@ -14,7 +14,7 @@ export interface Progress {
   logs: LogEntry[]
 }
 
-export type PaperSource = 'arxiv' | 'semantic_scholar' | 'web' | 'crossref'
+export type PaperSource = 'arxiv' | 'semantic_scholar' | 'google_scholar' | 'web' | 'crossref'
 export type ReadStatus = 'full_text' | 'abstract_only' | 'inferred'
 
 export interface Paper {

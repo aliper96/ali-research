@@ -24,21 +24,52 @@ class ParsedPaper:
 # ---------------------------------------------------------------------------
 
 def parse_pdf(content: bytes) -> ParsedPaper:
-    from pypdf import PdfReader
-
-    reader = PdfReader(io.BytesIO(content))
-    pages_text = [page.extract_text() or "" for page in reader.pages]
-    full_text = "\n".join(pages_text).strip()
-
+    full_text = _extract_pdf_text(content)
     title = _extract_pdf_title(full_text)
     abstract = _extract_pdf_abstract(full_text)
 
     return ParsedPaper(
         title=title,
         abstract=abstract,
-        full_text=full_text[:20_000],   # cap to avoid huge context
+        full_text=full_text[:30_000],   # 30k chars ≈ full 8-page paper
         source_type="pdf",
     )
+
+
+def _extract_pdf_text(content: bytes) -> str:
+    """
+    Try multiple PDF extraction strategies in order of quality.
+    1. pdfminer.six — best for column layouts (ACM/IEEE double-column)
+    2. pypdf — fast, good for single-column
+    Returns the longest non-empty result.
+    """
+    texts: list[str] = []
+
+    # Strategy 1: pdfminer.six (handles multi-column better)
+    try:
+        from pdfminer.high_level import extract_text as pdfminer_extract  # type: ignore
+        text = pdfminer_extract(io.BytesIO(content)) or ""
+        text = re.sub(r"\s{3,}", "\n\n", text).strip()
+        if len(text) > 200:
+            texts.append(text)
+    except Exception:
+        pass
+
+    # Strategy 2: pypdf page-by-page
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(content))
+        pages = [page.extract_text() or "" for page in reader.pages]
+        text = "\n".join(pages).strip()
+        if len(text) > 200:
+            texts.append(text)
+    except Exception:
+        pass
+
+    if not texts:
+        return ""
+    # Return the longest extraction (more text = better coverage)
+    return max(texts, key=len)
 
 
 def _extract_pdf_title(text: str) -> str:

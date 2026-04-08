@@ -93,8 +93,9 @@ def _get_client() -> openai.AsyncOpenAI:
 
 
 async def _call_model(client: openai.AsyncOpenAI, messages: list[dict], *, tools=True) -> Any:
+    model = os.getenv("LLM_MODEL", "gpt-5.4-nano")
     return await client.chat.completions.create(
-        model=os.getenv("LLM_MODEL", "gpt-4o"),
+        model=model,
         max_completion_tokens=6000,
         tools=TOOL_SPECS if tools else openai.NOT_GIVEN,  # type: ignore[arg-type]
         messages=messages,  # type: ignore[arg-type]
@@ -191,7 +192,7 @@ async def run_reviewer(
     )
 
     client = _get_client()
-    max_tool_calls = 8
+    max_tool_calls = 12   # enough for 3-4 searches + get_references + get_paper_citations
     tool_call_count = 0
 
     bib_section = (
@@ -204,15 +205,26 @@ async def run_reviewer(
         f"You are Reviewer {reviewer_id} for a scientific paper. "
         f"Your reviewing style: you are {persona}\n\n"
         "Your task:\n"
-        "1. Use search tools to find papers related to the submission — especially any that might "
-        "challenge its novelty claims.\n"
-        "2. Evaluate the paper on: novelty, technical soundness, clarity, and significance.\n"
-        "3. Return ONLY a JSON object matching the schema below — no extra text.\n\n"
+        "1. Carefully read the paper title, abstract, and text excerpt provided.\n"
+        "2. Search for closely related work — especially papers that could challenge "
+        "the novelty claims. Be strategic with your searches:\n"
+        "   - Try the exact method/system name from the title\n"
+        "   - Try 2-3 alternative phrasings (synonyms, parent fields, related approaches)\n"
+        "   - Try author names if the work seems incremental on a known line of research\n"
+        "   - Use search_semantic_scholar AND search_arxiv for better coverage\n"
+        "   - Use get_references on any highly relevant paper you find to snowball more\n"
+        "3. Evaluate the paper on: novelty (vs. what you found), technical soundness, "
+        "clarity, and significance.\n"
+        "4. Return ONLY a JSON object matching the schema below — no extra text.\n\n"
         f"Required JSON schema:\n{REVIEWER_JSON_SCHEMA}"
     )
 
-    # Truncate paper text to ~4000 chars to leave room for tool results
-    text_excerpt = paper_text[:4000] + ("\n[...truncated]" if len(paper_text) > 4000 else "")
+    # Give reviewers a substantial excerpt — 4o has 128k context, 12k chars ≈ 4-5 pages
+    _EXCERPT_CHARS = 12_000
+    text_excerpt = paper_text[:_EXCERPT_CHARS] + (
+        f"\n\n[... text truncated at {_EXCERPT_CHARS} chars ...]"
+        if len(paper_text) > _EXCERPT_CHARS else ""
+    )
 
     messages: list[dict] = [
         {"role": "system", "content": system},

@@ -205,7 +205,7 @@ async def process_upload(
     Returns a DocRecord with metadata.
     Raises on fatal errors.
     """
-    model = os.getenv("LLM_MODEL", "gpt-4o-mini")  # unused but consistent
+    model = os.getenv("LLM_MODEL", "gpt-5.4-nano")  # unused but consistent
     client = openai.AsyncOpenAI()
 
     doc_id = str(uuid.uuid4())
@@ -254,7 +254,7 @@ async def answer_question(question: str, top_k: int = 5) -> DocsQAResult:
     """
     Retrieve relevant chunks from all stored documents and synthesize an answer.
     """
-    model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+    model = os.getenv("LLM_MODEL", "gpt-5.4-nano")
     client = openai.AsyncOpenAI()
 
     chunks = await _retrieve_chunks(client, question, top_k=top_k)

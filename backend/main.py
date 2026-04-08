@@ -55,6 +55,7 @@ from .agent.draft_runner import run_draft
 from .agent.paper_parser import parse_paper
 from .agent.websearch_runner import run_websearch
 from .agent.docs_runner import process_upload, answer_question
+from .agent.pdf_export import generate_research_pdf
 from .models.schemas import ResearchSession, StartResearchRequest
 from .models.review_schemas import ReviewSession
 from .models.audit_schemas import AuditSession, StartAuditRequest
@@ -772,6 +773,35 @@ async def get_session(session_id: str) -> ResearchSession:
     if session is None:
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
     return session
+
+
+@app.get("/api/research/{session_id}/export/pdf")
+async def export_research_pdf(session_id: str) -> Response:
+    """Generate and download a formatted PDF of the research results."""
+    session = await session_store.get_or_load_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
+    if session.status != "completed" or session.result is None:
+        raise HTTPException(status_code=400, detail="Research session not yet completed.")
+
+    import asyncio
+    loop = asyncio.get_event_loop()
+    pdf_bytes = await loop.run_in_executor(
+        None,
+        generate_research_pdf,
+        session_id,
+        session.input,
+        session.result,
+    )
+
+    slug = "".join(c if c.isalnum() or c in "-_ " else "" for c in session.input)[:40].strip().replace(" ", "-").lower()
+    filename = f"research-{slug or session_id[:8]}.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/api/research/{session_id}/stream")

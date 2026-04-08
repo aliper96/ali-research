@@ -38,28 +38,54 @@ SYSTEM_PROMPT = """You are an expert academic researcher. Given a paper or topic
 5. Synthesize your findings into a comprehensive research report
 
 You have access to tools for:
-- paper retrieval: search_arxiv, get_arxiv_paper, search_semantic_scholar, search_papers, get_paper_metadata, get_references, get_paper_citations, resolve_paper_id
+- paper retrieval: search_arxiv, get_arxiv_paper, search_semantic_scholar, search_google_scholar, search_papers, get_paper_metadata, get_references, get_paper_citations, resolve_paper_id
 - supplemental sources: search_web, search_code, parse_pdf
 - analysis: extract_claims, extract_methodology, extract_results, extract_limitations, compare_papers, find_gaps, timeline_topic, citation_check, quality_review, compact_context
 - synthesis/planning: plan_research, generate_report, build_reading_list, build_implementation_plan, generate_bibliography
 - memory/state: save_note, get_notes, paper_catalog_upsert, cache_store, cache_lookup, source_coverage, budget_status
 - cross-session: search_session_memory (searches papers from ALL prior research sessions — call this FIRST to find known sources before searching APIs)
 
-Be thorough but efficient. For "quick" depth: 5-8 papers, 3-6 tool calls. For "standard": 10-15 papers, 6-12 tool calls. For "deep": 20+ papers, 12-20 tool calls.
+── TARGET PAPER COUNTS (MANDATORY) ────────────────────────────────────────────
+quick: at least 5 papers | standard: at least 10 papers | deep: at least 20 papers
 
-Prefer this workflow:
-1. search_session_memory to check what was already researched in prior sessions
-2. plan_research or resolve_paper_id
-3. search_papers plus one source-specific search (skip sources already covered by memory)
-3. get_paper_metadata / references / citations for the strongest papers
-4. analysis tools on the best paper texts/abstracts
-5. source_coverage or budget_status if you are unsure whether to continue
-6. final synthesis into the required JSON
+You MUST reach the target before writing the final JSON. If you are below target,
+run more searches with different query formulations — do NOT synthesise too early.
 
-For provenance, set these fields per paper:
-- "source": one of "arxiv", "semantic_scholar", "web", "crossref" — whichever API returned this paper
-- "read_status": "full_text" if you fetched the full paper/PDF, "abstract_only" if you only read the abstract, "inferred" if you derived it from references or metadata without reading it directly
-- "venue": conference or journal name if known (e.g. "NeurIPS 2023", "ICML 2024", "Nature", null if unknown)
+── QUERY EXPANSION FOR NICHE / COMPOUND TOPICS ────────────────────────────────
+When a topic is a compound word, acronym, or very specific term that returns < 5
+results, you MUST try multiple alternative formulations. Examples:
+
+  "LEARNHEURISTICS"  → "learning heuristics", "learned heuristics",
+                        "heuristic learning", "neural heuristics",
+                        "machine learning metaheuristics", "deep learning combinatorial optimization"
+
+  "GNNs for routing" → "graph neural network vehicle routing",
+                        "GNN combinatorial optimization", "deep learning TSP"
+
+Rules for query expansion:
+1. Break compound words into components and search each variation.
+2. Try synonyms, parent categories, and closely related fields.
+3. If a term sounds like an acronym or a niche system name, also search for it
+   on Semantic Scholar and with search_web to find the defining paper.
+4. Do NOT declare "no papers found" after a single query — always try 3–5
+   reformulations before concluding a topic is truly uncovered.
+5. Use get_references / get_paper_citations on any paper you DO find to discover
+   related works that might not appear in direct keyword searches.
+
+── PREFERRED WORKFLOW ──────────────────────────────────────────────────────────
+1. search_session_memory — check prior sessions first
+2. plan_research — list 3–5 query variations you will use
+3. search_papers (primary query) + search_semantic_scholar or search_google_scholar
+4. If result count < target: run search_arxiv / search_papers with 2–3 alternative queries
+5. get_references + get_paper_citations on the top 2–3 papers found
+6. get_paper_metadata / parse_pdf for the most important papers
+7. analysis tools (find_gaps, extract_methodology) on best texts
+8. final synthesis into the required JSON
+
+── PROVENANCE FIELDS ───────────────────────────────────────────────────────────
+- "source": "arxiv" | "semantic_scholar" | "google_scholar" | "web" | "crossref"
+- "read_status": "full_text" | "abstract_only" | "inferred"
+- "venue": conference/journal name if known, null if unknown
 
 At the end, you MUST return a JSON object with this exact structure (and nothing else after it):
 {
@@ -136,7 +162,7 @@ def parse_result(data: dict, session_id: str) -> ResearchResult:
         try:
             score = _coerce_float(raw.get("relevance_score"), 0.5)
             score = max(0.0, min(1.0, score))
-            valid_sources = {"arxiv", "semantic_scholar", "web", "crossref"}
+            valid_sources = {"arxiv", "semantic_scholar", "google_scholar", "web", "crossref"}
             valid_read_statuses = {"full_text", "abstract_only", "inferred"}
             raw_source = _coerce_str(raw.get("source")).lower() or None
             raw_read_status = _coerce_str(raw.get("read_status")).lower() or None
@@ -275,15 +301,21 @@ async def run_research(
             "role": "user",
             "content": (
                 f"Research this topic/paper: {user_input}\n\n"
-                f"Session ID: {session_id}\n\n"
+                f"Session ID: {session_id}\n"
                 f"Depth: {depth}\n\n"
+                f"IMPORTANT: You must find AT LEAST "
+                f"{ {'quick':5,'standard':10,'deep':20}.get(depth,10) } papers before synthesising.\n"
+                "If the exact topic has few results, EXPAND your queries — break compound words, "
+                "try synonyms, parent fields, and related terminology. "
+                "Use get_references and get_paper_citations on any paper you find "
+                "to discover more related works.\n\n"
                 "Use the tools to gather information, then return the final JSON report. "
                 "If you use budget_status, pass this exact session ID."
             ),
         },
     ]
 
-    max_tool_calls = {"quick": 6, "standard": 12, "deep": 20}.get(depth, 12)
+    max_tool_calls = {"quick": 8, "standard": 18, "deep": 28}.get(depth, 18)
     tool_call_count = 0
 
     async def _call_model(msgs: list[dict]) -> Any:
@@ -489,13 +521,17 @@ async def run_research(
             await session_store.add_log(
                 session_id, "Maximum tool calls reached; asking model to synthesise results.", "warning"
             )
+            depth_targets = {"quick": 5, "standard": 10, "deep": 20}
+            target = depth_targets.get(depth, 10)
             messages.append(
                 {
                     "role": "user",
                     "content": (
-                        "You have reached the maximum number of tool calls. "
-                        "Please synthesise everything you have gathered so far "
-                        "and return the final JSON report now."
+                        f"You have reached the maximum number of tool calls. "
+                        f"Target for this depth ('{depth}') is {target} papers. "
+                        "Include every paper you found across all tool calls — even if you "
+                        "only have an abstract or title, include it with read_status='abstract_only'. "
+                        "Return the final JSON report now."
                     ),
                 }
             )

@@ -4,7 +4,10 @@ Perplexity-like web search runner — powered by SearXNG (no API keys).
 Flow:
 1. Generate 3-5 search queries from the user question via LLM
 2. Search the web via SearXNG (local instance or public fallback)
-3. Fetch full page content from the top results (trafilatura > httpx fallback)
+3. Fetch full page content from the top results using a smart strategy:
+   - DIRECT_ONLY domains (GitHub, arXiv, Wikipedia, docs…): httpx + trafilatura, no Jina
+   - JINA_PREFERRED domains (Reddit, Medium, SPAs…): Jina first, direct as fallback
+   - Unknown domains: try direct first; if content is thin, Jina as fallback
 4. LLM synthesizes a comprehensive structured answer with inline [N] citations
    in the SAME LANGUAGE as the user's question
 5. Returns WebSearchResult with answer, sources, follow-up questions
@@ -28,7 +31,124 @@ logger = logging.getLogger(__name__)
 
 _MAX_CONTENT_CHARS = 4000   # chars per source passed to LLM
 _MAX_SNIPPET_CHARS = 600    # fallback when page fetch fails
-_JINA_MIN_CHARS   = 200     # if Jina returns less than this, it probably failed
+_JINA_MIN_CHARS   = 200     # Jina result is considered "failed" below this
+_DIRECT_GOOD_CHARS = 500    # direct result is considered "good enough" above this
+
+# ---------------------------------------------------------------------------
+# Jina routing policy
+# ---------------------------------------------------------------------------
+
+# These domains return good content via plain httpx — never waste Jina on them.
+_DIRECT_ONLY_DOMAINS: frozenset[str] = frozenset({
+    # GitHub — handled via blob→raw rewrite + direct fetch
+    "github.com",
+    "api.github.com",
+    "raw.githubusercontent.com",
+    "gist.github.com",
+    # arXiv / academic papers
+    "arxiv.org",
+    "export.arxiv.org",
+    "ar5iv.labs.arxiv.org",
+    # Wikipedia
+    "en.wikipedia.org",
+    "es.wikipedia.org",
+    "fr.wikipedia.org",
+    "de.wikipedia.org",
+    "wikipedia.org",
+    # Official docs (static HTML)
+    "developer.mozilla.org",
+    "docs.python.org",
+    "docs.rs",              # Rust docs
+    "pkg.go.dev",           # Go docs
+    "nodejs.org",
+    "kotlinlang.org",
+    "docs.oracle.com",
+    "cppreference.com",
+    "learn.microsoft.com",
+    # Package registries
+    "pypi.org",
+    "npmjs.com",
+    "crates.io",
+    # HuggingFace (model cards are static)
+    "huggingface.co",
+    # Stack Overflow / Stack Exchange
+    "stackoverflow.com",
+    "stackexchange.com",
+    "superuser.com",
+    "serverfault.com",
+    # Papers / journals
+    "semanticscholar.org",
+    "paperswithcode.com",
+    "aclanthology.org",
+    "openreview.net",
+})
+
+# These domains need JavaScript rendering — go straight to Jina, skip direct.
+_JINA_PREFERRED_DOMAINS: frozenset[str] = frozenset({
+    "reddit.com",
+    "old.reddit.com",
+    "new.reddit.com",
+    "medium.com",
+    "towardsdatascience.com",
+    "betterprogramming.pub",
+    "levelup.gitconnected.com",
+    "substack.com",
+    "hackernoon.com",
+    "dev.to",
+    "hashnode.com",
+    "notion.site",
+    "notion.so",
+})
+
+
+def _normalize_domain(url: str) -> str:
+    """Return the bare domain, stripping www. and any subpath."""
+    try:
+        host = urlparse(url).netloc.lower()
+        return host.removeprefix("www.")
+    except Exception:
+        return ""
+
+
+def _rewrite_github_url(url: str) -> str:
+    """
+    Convert github.com blob/tree URLs to raw.githubusercontent.com so we can
+    fetch the actual file content instead of the rendered HTML wrapper.
+
+    github.com/<owner>/<repo>/blob/<branch>/<path>
+      → raw.githubusercontent.com/<owner>/<repo>/<branch>/<path>
+    """
+    blob_match = re.match(
+        r"https?://github\.com/([^/]+/[^/]+)/blob/([^?#]+)",
+        url,
+        re.IGNORECASE,
+    )
+    if blob_match:
+        repo_path = blob_match.group(1)
+        file_path = blob_match.group(2)
+        return f"https://raw.githubusercontent.com/{repo_path}/{file_path}"
+    return url
+
+
+def _is_direct_only(domain: str) -> bool:
+    """True if this domain should NEVER use Jina."""
+    if domain in _DIRECT_ONLY_DOMAINS:
+        return True
+    # Catch all *.wikipedia.org, *.github.io, etc.
+    if domain.endswith((".wikipedia.org", ".github.io", ".arxiv.org")):
+        return True
+    # Catch all substack personal sites (<blog>.substack.com handled separately)
+    return False
+
+
+def _is_jina_preferred(domain: str) -> bool:
+    """True if this domain is known to need JS rendering."""
+    if domain in _JINA_PREFERRED_DOMAINS:
+        return True
+    # Personal substack blogs: <anything>.substack.com
+    if domain.endswith(".substack.com"):
+        return True
+    return False
 
 _SEARXNG_INSTANCES = [
     os.environ.get("SEARXNG_URL", ""),  # local instance if configured
@@ -53,10 +173,8 @@ _FETCH_HEADERS = {
 # ---------------------------------------------------------------------------
 
 def _extract_domain(url: str) -> str:
-    try:
-        return urlparse(url).netloc.replace("www.", "")
-    except Exception:
-        return ""
+    """Alias kept for the SearXNG result builder — delegates to _normalize_domain."""
+    return _normalize_domain(url)
 
 
 def _strip_html(html: str) -> str:
@@ -122,7 +240,11 @@ async def _fetch_via_jina(url: str) -> str:
 
 
 async def _fetch_direct(url: str) -> str:
-    """Direct httpx fetch + trafilatura extraction. Fallback for Jina failures."""
+    """
+    Direct httpx fetch + trafilatura extraction.
+    Also handles JSON responses (GitHub API, package registries, etc.)
+    by pretty-printing them as readable text.
+    """
     try:
         async with httpx.AsyncClient(
             timeout=10.0,
@@ -132,6 +254,13 @@ async def _fetch_direct(url: str) -> str:
             resp = await client.get(url)
             resp.raise_for_status()
             ct = resp.headers.get("content-type", "")
+            if "json" in ct or url.startswith("https://api.github.com"):
+                # Pretty-print JSON (GitHub API, npm registry, etc.)
+                try:
+                    data = resp.json()
+                    return json.dumps(data, indent=2, ensure_ascii=False)[:_MAX_CONTENT_CHARS]
+                except Exception:
+                    return resp.text[:_MAX_CONTENT_CHARS]
             if "html" not in ct and "text" not in ct:
                 return ""
             text = await asyncio.to_thread(_extract_with_trafilatura, resp.text, url)
@@ -143,31 +272,51 @@ async def _fetch_direct(url: str) -> str:
 
 async def _fetch_page(url: str) -> str:
     """
-    Fetch a page with the best available method:
-    1. Jina Reader (renders JS, returns markdown) — handles GitHub Topics, Reddit, SPAs
-    2. Direct httpx + trafilatura — fallback for static pages / if Jina is slow
+    Smart fetch strategy — picks the right tool for each domain:
+
+    DIRECT_ONLY  (GitHub, arXiv, Wikipedia, official docs, SO):
+        → plain httpx + trafilatura.  Never touches Jina.
+
+    JINA_PREFERRED  (Reddit, Medium, Substack, SPAs):
+        → Jina first.  Falls back to direct if Jina returns < _JINA_MIN_CHARS.
+
+    UNKNOWN domains:
+        → direct first (fast, free).
+          If result is thin (< _DIRECT_GOOD_CHARS), try Jina as fallback.
+          Return whichever is longer.
     """
-    # Run both in parallel, take whichever gives better content
-    jina_task   = asyncio.create_task(_fetch_via_jina(url))
-    direct_task = asyncio.create_task(_fetch_direct(url))
+    # Step 0: rewrite GitHub blob URLs → raw content before anything
+    original_url = url
+    url = _rewrite_github_url(url)
+    domain = _normalize_domain(url)
+    if not domain:
+        domain = _normalize_domain(original_url)
 
-    # Wait for Jina first (up to 12s); if it's good, cancel direct
-    try:
-        jina_text = await asyncio.wait_for(asyncio.shield(jina_task), timeout=12.0)
-    except asyncio.TimeoutError:
-        jina_text = ""
+    logger.debug("_fetch_page domain=%s url=%s", domain, url)
 
-    if len(jina_text) >= _JINA_MIN_CHARS:
-        direct_task.cancel()
-        return jina_text
+    # ── Direct-only domains ────────────────────────────────────────────────
+    if _is_direct_only(domain):
+        return await _fetch_direct(url)
 
-    # Jina failed or returned little — use direct fetch result
-    try:
-        direct_text = await direct_task
-    except Exception:
-        direct_text = ""
+    # ── Jina-preferred domains ─────────────────────────────────────────────
+    if _is_jina_preferred(domain):
+        jina_text = await _fetch_via_jina(url)
+        if len(jina_text) >= _JINA_MIN_CHARS:
+            return jina_text
+        # Jina was poor — try direct as safety net
+        logger.debug("Jina-preferred %s returned little (%d chars), falling back to direct", domain, len(jina_text))
+        direct_text = await _fetch_direct(url)
+        return direct_text if len(direct_text) >= len(jina_text) else jina_text
 
-    # Return whichever has more content
+    # ── Unknown domain: direct → Jina fallback ────────────────────────────
+    direct_text = await _fetch_direct(url)
+    if len(direct_text) >= _DIRECT_GOOD_CHARS:
+        # Direct gave plenty of content — no need for Jina
+        return direct_text
+
+    # Direct was thin (JS-heavy page, paywall, empty HTML, etc.) — try Jina
+    logger.debug("Direct fetch thin (%d chars) for %s — trying Jina fallback", len(direct_text), domain)
+    jina_text = await _fetch_via_jina(url)
     return jina_text if len(jina_text) > len(direct_text) else direct_text
 
 
@@ -369,7 +518,7 @@ async def run_websearch(
     user_input: str,
     recency: str = "any",
 ) -> None:
-    model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+    model = os.getenv("LLM_MODEL", "gpt-5.4-nano")
     client = openai.AsyncOpenAI()
 
     async def _log(msg: str, level: str = "info") -> None:

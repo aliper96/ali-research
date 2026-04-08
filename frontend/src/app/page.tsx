@@ -1,195 +1,235 @@
 import SearchForm from '@/components/SearchForm'
 import SessionHistory from '@/components/SessionHistory'
-import { BookOpen, Cpu, Database, Globe, FileText, FlaskConical, Bell, GitCompareArrows, RefreshCw, BookMarked, FolderOpen, Brain, Search, BookOpenCheck } from 'lucide-react'
+import {
+  BookOpen, Cpu, Database, Globe, FileText, FlaskConical,
+  Bell, GitCompareArrows, RefreshCw, BookMarked, FolderOpen,
+  Brain, Search, BookOpenCheck, ArrowRight,
+} from 'lucide-react'
 import Link from 'next/link'
+
+// Featured workflows — shown as prominent cards
+const PRIMARY_SHORTCUTS = [
+  {
+    href: '/websearch',
+    icon: Search,
+    label: 'Web Search',
+    description: 'Search the web and get a cited, synthesized answer — like Perplexity, no API keys needed.',
+    color: 'cyan',
+    border: 'border-cyan-900/50 hover:border-cyan-700/60',
+    bg: 'bg-cyan-950/20 hover:bg-cyan-900/15',
+    iconColor: 'text-cyan-400',
+    badge: 'SearXNG',
+  },
+  {
+    href: '/docs',
+    icon: BookOpenCheck,
+    label: 'Document Q&A',
+    description: 'Upload PDFs or text files and chat with your own documents. RAG-powered, runs locally.',
+    color: 'violet',
+    border: 'border-violet-900/50 hover:border-violet-700/60',
+    bg: 'bg-violet-950/20 hover:bg-violet-900/15',
+    iconColor: 'text-violet-400',
+    badge: 'RAG',
+  },
+]
+
+// Featured workflows â€” shown as prominent cards
+const FEATURED = [
+  {
+    href: '/deepresearch',
+    icon: Cpu,
+    label: 'Deep Research',
+    description: 'Multi-step autonomous research over arXiv and Semantic Scholar with roadmap generation.',
+    color: 'indigo',
+    border: 'border-indigo-900/50 hover:border-indigo-700/60',
+    bg: 'bg-indigo-950/20 hover:bg-indigo-900/15',
+    iconColor: 'text-indigo-400',
+    badge: 'Agentic',
+  },
+]
+
+// Secondary tools — compact chip row
+const SECONDARY = [
+  { href: '/review',       icon: FileText,         label: 'Review Paper',  color: 'hover:text-violet-300' },
+  { href: '/audit',        icon: FlaskConical,     label: 'Audit Paper',   color: 'hover:text-amber-300' },
+  { href: '/global-network', icon: Globe,          label: 'Global Network',color: 'hover:text-indigo-300' },
+  { href: '/watch',        icon: Bell,             label: 'Watches',       color: 'hover:text-emerald-300' },
+  { href: '/autoresearch', icon: RefreshCw,        label: 'Auto Research', color: 'hover:text-emerald-300' },
+  { href: '/lit',          icon: BookMarked,       label: 'Lit Review',    color: 'hover:text-violet-300' },
+  { href: '/compare',      icon: GitCompareArrows, label: 'Compare',       color: 'hover:text-cyan-300' },
+  { href: '/draft',        icon: FileText,         label: 'Draft',         color: 'hover:text-orange-300' },
+  { href: '/outputs',      icon: FolderOpen,       label: 'Outputs',       color: 'hover:text-yellow-300' },
+  { href: '/knowledge',    icon: Brain,            label: 'Knowledge',     color: 'hover:text-teal-300' },
+]
 
 export default function HomePage() {
   return (
-    <main className="flex min-h-screen flex-col">
-      {/* Background decorations */}
-      <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute -top-40 -left-40 h-80 w-80 rounded-full bg-indigo-900/10 blur-3xl" />
-        <div className="absolute top-1/3 -right-40 h-96 w-96 rounded-full bg-indigo-900/10 blur-3xl" />
-        <div className="absolute -bottom-40 left-1/3 h-80 w-80 rounded-full bg-purple-900/10 blur-3xl" />
+    <main className="flex min-h-screen flex-col bg-[#080d1a]">
 
-        {/* Grid overlay */}
+      {/* Background blobs */}
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute -top-56 -left-56 h-[500px] w-[500px] rounded-full bg-indigo-900/8 blur-[100px]" />
+        <div className="absolute top-1/2 -right-56 h-[400px] w-[400px] rounded-full bg-indigo-900/6 blur-[80px]" />
+        <div className="absolute bottom-0 left-1/4 h-[300px] w-[300px] rounded-full bg-purple-900/6 blur-[80px]" />
+        {/* Subtle grid */}
         <div
-          className="absolute inset-0 opacity-[0.03]"
+          className="absolute inset-0 opacity-[0.025]"
           style={{
             backgroundImage:
               'linear-gradient(#6366f1 1px, transparent 1px), linear-gradient(90deg, #6366f1 1px, transparent 1px)',
-            backgroundSize: '60px 60px',
+            backgroundSize: '64px 64px',
           }}
         />
       </div>
 
-      {/* Content */}
-      <div className="relative flex flex-1 flex-col items-center justify-center px-4 py-16">
-        {/* Header */}
-        <div className="mb-12 text-center space-y-4">
-          {/* Row 1: branding + existing tools */}
-          <div className="flex flex-wrap items-center justify-center gap-2 mb-3">
-            <div className="inline-flex items-center gap-2 rounded-full border border-indigo-800/50 bg-indigo-900/20 px-4 py-1.5 text-xs text-indigo-300">
-              <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" />
-              Powered by Claude AI
-            </div>
-            <Link
-              href="/global-network"
-              className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-1.5 text-xs text-slate-400 hover:border-indigo-700/60 hover:bg-indigo-900/20 hover:text-indigo-300 transition-all duration-200"
-            >
-              <Globe className="h-3.5 w-3.5" />
-              Global Network
-            </Link>
-            <Link
-              href="/review"
-              className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-1.5 text-xs text-slate-400 hover:border-violet-700/60 hover:bg-violet-900/20 hover:text-violet-300 transition-all duration-200"
-            >
-              <FileText className="h-3.5 w-3.5" />
-              Review My Paper
-            </Link>
-            <Link
-              href="/audit"
-              className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-1.5 text-xs text-slate-400 hover:border-amber-700/60 hover:bg-amber-900/20 hover:text-amber-300 transition-all duration-200"
-            >
-              <FlaskConical className="h-3.5 w-3.5" />
-              Audit a Paper
-            </Link>
-            <Link
-              href="/watch"
-              className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-1.5 text-xs text-slate-400 hover:border-emerald-700/60 hover:bg-emerald-900/20 hover:text-emerald-300 transition-all duration-200"
-            >
-              <Bell className="h-3.5 w-3.5" />
-              Watches
-            </Link>
+      {/* Main content */}
+      <div className="relative flex flex-1 flex-col px-4 py-16 max-w-4xl mx-auto w-full">
+
+        {/* ── Hero ────────────────────────────────────────────────────────── */}
+        <div className="mb-14 text-center">
+          <div className="inline-flex items-center gap-2 rounded-full border border-indigo-900/60 bg-indigo-950/30 px-4 py-1.5 text-xs text-indigo-400 mb-6">
+            <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" />
+            Powered by Claude AI
           </div>
 
-          {/* Row 2: new workflows */}
-          <div className="flex flex-wrap items-center justify-center gap-2 mb-6">
-            <Link
-              href="/websearch"
-              className="inline-flex items-center gap-2 rounded-full border border-cyan-800/60 bg-cyan-900/20 px-4 py-1.5 text-xs text-cyan-300 hover:border-cyan-600 hover:bg-cyan-800/30 hover:text-cyan-100 transition-all duration-200"
-            >
-              <Search className="h-3.5 w-3.5" />
-              Web Search
-            </Link>
-            <Link
-              href="/docs"
-              className="inline-flex items-center gap-2 rounded-full border border-violet-800/60 bg-violet-900/20 px-4 py-1.5 text-xs text-violet-300 hover:border-violet-600 hover:bg-violet-800/30 hover:text-violet-100 transition-all duration-200"
-            >
-              <BookOpenCheck className="h-3.5 w-3.5" />
-              Doc Q&A
-            </Link>
-            <Link
-              href="/deepresearch"
-              className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-1.5 text-xs text-slate-400 hover:border-indigo-700/60 hover:bg-indigo-900/20 hover:text-indigo-300 transition-all duration-200"
-            >
-              <Cpu className="h-3.5 w-3.5" />
-              Deep Research
-            </Link>
-            <Link
-              href="/autoresearch"
-              className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-1.5 text-xs text-slate-400 hover:border-emerald-700/60 hover:bg-emerald-900/20 hover:text-emerald-300 transition-all duration-200"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              Auto Research
-            </Link>
-            <Link
-              href="/lit"
-              className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-1.5 text-xs text-slate-400 hover:border-violet-700/60 hover:bg-violet-900/20 hover:text-violet-300 transition-all duration-200"
-            >
-              <BookMarked className="h-3.5 w-3.5" />
-              Lit Review
-            </Link>
-            <Link
-              href="/compare"
-              className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-1.5 text-xs text-slate-400 hover:border-cyan-700/60 hover:bg-cyan-900/20 hover:text-cyan-300 transition-all duration-200"
-            >
-              <GitCompareArrows className="h-3.5 w-3.5" />
-              Compare
-            </Link>
-            <Link
-              href="/draft"
-              className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-1.5 text-xs text-slate-400 hover:border-orange-700/60 hover:bg-orange-900/20 hover:text-orange-300 transition-all duration-200"
-            >
-              <FileText className="h-3.5 w-3.5" />
-              Draft
-            </Link>
-            <Link
-              href="/outputs"
-              className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-1.5 text-xs text-slate-400 hover:border-yellow-700/60 hover:bg-yellow-900/20 hover:text-yellow-300 transition-all duration-200"
-            >
-              <FolderOpen className="h-3.5 w-3.5" />
-              Outputs
-            </Link>
-            <Link
-              href="/knowledge"
-              className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-1.5 text-xs text-slate-400 hover:border-teal-700/60 hover:bg-teal-900/20 hover:text-teal-300 transition-all duration-200"
-            >
-              <Brain className="h-3.5 w-3.5" />
-              Knowledge
-            </Link>
-          </div>
-
-          <h1 className="text-5xl font-bold tracking-tight sm:text-6xl lg:text-7xl">
+          <h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold tracking-tight font-[family-name:var(--font-display)] mb-4">
             <span className="gradient-text">ali_researcher</span>
           </h1>
 
-          <p className="mt-4 text-lg text-slate-400 max-w-md mx-auto leading-relaxed">
-            AI-powered academic research assistant.{' '}
-            <span className="text-slate-300">Explore papers, find gaps, build your roadmap.</span>
+          <p className="text-lg text-slate-400 max-w-lg mx-auto leading-relaxed">
+            AI-powered research assistant.{' '}
+            <span className="text-slate-300">Explore papers, search the web, chat with your documents.</span>
           </p>
         </div>
 
-        {/* Search Form */}
-        <div className="w-full max-w-2xl">
+        {/* ── Main search ─────────────────────────────────────────────────── */}
+        <div className="w-full mb-16">
           <SearchForm />
+
+          <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {PRIMARY_SHORTCUTS.map((item) => {
+              const Icon = item.icon
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`group flex flex-col gap-3 rounded-2xl border ${item.border} ${item.bg} p-5 transition-all duration-200 hover:-translate-y-0.5`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className={`flex h-10 w-10 items-center justify-center rounded-2xl border border-current/20 bg-black/10 ${item.iconColor}`}>
+                        <Icon className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-semibold text-slate-100">{item.label}</div>
+                        <div className="text-[11px] font-mono text-slate-600">{item.badge}</div>
+                      </div>
+                    </div>
+                    <ArrowRight className={`h-4 w-4 ${item.iconColor} transition-transform duration-200 group-hover:translate-x-1`} />
+                  </div>
+                  <p className="text-sm leading-relaxed text-slate-400">
+                    {item.description}
+                  </p>
+                </Link>
+              )
+            })}
+          </div>
         </div>
 
-        {/* Session History */}
+        {/* ── Featured workflows ──────────────────────────────────────────── */}
+        <div className="mb-10">
+          <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-600 mb-4">
+            Featured workflow
+          </p>
+          <div className="grid grid-cols-1 gap-3">
+            {FEATURED.map((item) => {
+              const Icon = item.icon
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`group flex flex-col gap-3 rounded-2xl border ${item.border} ${item.bg} p-5 transition-all duration-200`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className={`flex items-center gap-2 ${item.iconColor}`}>
+                      <Icon className="h-4 w-4" />
+                      <span className="text-sm font-semibold">{item.label}</span>
+                    </div>
+                    <span className="text-[10px] font-mono text-slate-600 border border-[#1d2d47] rounded px-1.5 py-0.5">
+                      {item.badge}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    {item.description}
+                  </p>
+                  <div className={`flex items-center gap-1 text-xs ${item.iconColor} opacity-0 group-hover:opacity-100 transition-opacity`}>
+                    Open <ArrowRight className="h-3 w-3" />
+                  </div>
+                </Link>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* ── Secondary tools ─────────────────────────────────────────────── */}
+        <div className="flex flex-wrap gap-2 justify-center mb-12">
+          {SECONDARY.map((item) => {
+            const Icon = item.icon
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`inline-flex items-center gap-1.5 rounded-full border border-[#1d2d47] bg-[#0d1526]/50 px-3.5 py-1.5 text-xs text-slate-500 transition-all duration-150 hover:border-[#2d3f5a] ${item.color}`}
+              >
+                <Icon className="h-3 w-3" />
+                {item.label}
+              </Link>
+            )
+          })}
+        </div>
+
+        {/* ── Session history ──────────────────────────────────────────────── */}
         <SessionHistory />
 
-        {/* Feature highlights */}
-        <div className="mt-16 grid grid-cols-1 gap-4 sm:grid-cols-3 max-w-2xl w-full">
+        {/* ── Feature pills ───────────────────────────────────────────────── */}
+        <div className="mt-12 grid grid-cols-1 gap-3 sm:grid-cols-3">
           {[
             {
-              icon: <BookOpen className="h-5 w-5 text-indigo-400" />,
+              icon: <BookOpen className="h-4 w-4 text-indigo-400" />,
               title: 'Paper Discovery',
-              description: 'Search arXiv, Semantic Scholar and curated databases',
+              description: 'arXiv, Semantic Scholar and curated databases',
             },
             {
-              icon: <Cpu className="h-5 w-5 text-indigo-400" />,
+              icon: <Cpu className="h-4 w-4 text-indigo-400" />,
               title: 'AI Analysis',
               description: 'Summarize findings, identify key concepts and gaps',
             },
             {
-              icon: <Database className="h-5 w-5 text-indigo-400" />,
+              icon: <Database className="h-4 w-4 text-indigo-400" />,
               title: 'Research Roadmap',
-              description: 'Step-by-step implementation guide with difficulty ratings',
+              description: 'Step-by-step guide with difficulty ratings',
             },
           ].map((feature) => (
             <div
               key={feature.title}
-              className="rounded-lg border border-slate-800 bg-slate-900/50 p-4 text-center"
+              className="rounded-xl border border-[#1d2d47] bg-[#0d1526]/40 p-4 text-center"
             >
-              <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-indigo-900/40 border border-indigo-800/50">
+              <div className="mx-auto mb-2.5 flex h-8 w-8 items-center justify-center rounded-full bg-indigo-900/30 border border-indigo-900/50">
                 {feature.icon}
               </div>
-              <h3 className="text-sm font-semibold text-slate-200 mb-1">{feature.title}</h3>
-              <p className="text-xs text-slate-500 leading-relaxed">{feature.description}</p>
+              <h3 className="text-sm font-semibold text-slate-200 mb-1 font-[family-name:var(--font-display)]">
+                {feature.title}
+              </h3>
+              <p className="text-xs text-slate-600 leading-relaxed">{feature.description}</p>
             </div>
           ))}
         </div>
       </div>
 
       {/* Footer */}
-      <footer className="relative border-t border-slate-800/50 py-6 text-center">
-        <p className="text-xs text-slate-600">
-          Powered by{' '}
-          <span className="text-slate-500">Claude</span>
-          {' + '}
-          <span className="text-slate-500">arXiv</span>
-          {' + '}
-          <span className="text-slate-500">Semantic Scholar</span>
+      <footer className="relative border-t border-[#1d2d47]/50 py-6 text-center">
+        <p className="text-xs text-slate-700">
+          Claude + arXiv + Semantic Scholar + SearXNG
         </p>
       </footer>
     </main>

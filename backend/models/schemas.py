@@ -29,7 +29,7 @@ class Paper(BaseModel):
     citation_count: int = 0
     tags: list[str] = Field(default_factory=list)
     # Provenance fields
-    source: Optional[Literal["arxiv", "semantic_scholar", "web", "crossref"]] = None
+    source: Optional[Literal["arxiv", "semantic_scholar", "google_scholar", "web", "crossref"]] = None
     read_status: Optional[Literal["full_text", "abstract_only", "inferred"]] = None
     venue: Optional[str] = None
     url_verified: Optional[bool] = None
