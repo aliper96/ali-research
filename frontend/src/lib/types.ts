@@ -256,6 +256,64 @@ export interface KnowledgeStats {
 }
 
 // ---------------------------------------------------------------------------
+// Docs (PDF / document Q&A)
+// ---------------------------------------------------------------------------
+
+export interface DocRecord {
+  doc_id: string
+  title: string
+  filename: string
+  page_count: number
+  chunk_count: number
+  created_at: string
+  size_bytes: number
+}
+
+export interface DocChunkRef {
+  doc_id: string
+  doc_title: string
+  chunk_index: number
+  content: string
+}
+
+export interface DocsQAResult {
+  question: string
+  answer: string
+  sources: DocChunkRef[]
+}
+
+// ---------------------------------------------------------------------------
+// Web Search (Perplexity-like)
+// ---------------------------------------------------------------------------
+
+export interface WebSource {
+  title: string
+  url: string
+  snippet: string
+  content: string
+  published_date: string | null
+  domain: string
+}
+
+export interface WebSearchResult {
+  answer: string
+  sources: WebSource[]
+  follow_up_questions: string[]
+  queries_used: string[]
+}
+
+export interface WebSearchSession {
+  session_id: string
+  status: SessionStatus
+  input: string
+  created_at: string
+  progress: Progress
+  result: WebSearchResult | null
+}
+
+export type WebSearchRecency = 'any' | 'day' | 'week' | 'month'
+
+// ---------------------------------------------------------------------------
 // Knowledge graph (Memgraph)
 // ---------------------------------------------------------------------------
 export interface GraphNode {

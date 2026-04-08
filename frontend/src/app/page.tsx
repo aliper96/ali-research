@@ -1,6 +1,6 @@
 import SearchForm from '@/components/SearchForm'
 import SessionHistory from '@/components/SessionHistory'
-import { BookOpen, Cpu, Database, Globe, FileText, FlaskConical, Bell, GitCompareArrows, RefreshCw, BookMarked, FolderOpen, Brain } from 'lucide-react'
+import { BookOpen, Cpu, Database, Globe, FileText, FlaskConical, Bell, GitCompareArrows, RefreshCw, BookMarked, FolderOpen, Brain, Search, BookOpenCheck } from 'lucide-react'
 import Link from 'next/link'
 
 export default function HomePage() {
@@ -65,6 +65,20 @@ export default function HomePage() {
 
           {/* Row 2: new workflows */}
           <div className="flex flex-wrap items-center justify-center gap-2 mb-6">
+            <Link
+              href="/websearch"
+              className="inline-flex items-center gap-2 rounded-full border border-cyan-800/60 bg-cyan-900/20 px-4 py-1.5 text-xs text-cyan-300 hover:border-cyan-600 hover:bg-cyan-800/30 hover:text-cyan-100 transition-all duration-200"
+            >
+              <Search className="h-3.5 w-3.5" />
+              Web Search
+            </Link>
+            <Link
+              href="/docs"
+              className="inline-flex items-center gap-2 rounded-full border border-violet-800/60 bg-violet-900/20 px-4 py-1.5 text-xs text-violet-300 hover:border-violet-600 hover:bg-violet-800/30 hover:text-violet-100 transition-all duration-200"
+            >
+              <BookOpenCheck className="h-3.5 w-3.5" />
+              Doc Q&A
+            </Link>
             <Link
               href="/deepresearch"
               className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-1.5 text-xs text-slate-400 hover:border-indigo-700/60 hover:bg-indigo-900/20 hover:text-indigo-300 transition-all duration-200"

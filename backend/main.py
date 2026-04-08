@@ -53,16 +53,21 @@ from .agent.lit_runner import run_lit_review
 from .agent.compare_runner import run_compare
 from .agent.draft_runner import run_draft
 from .agent.paper_parser import parse_paper
+from .agent.websearch_runner import run_websearch
+from .agent.docs_runner import process_upload, answer_question
 from .models.schemas import ResearchSession, StartResearchRequest
 from .models.review_schemas import ReviewSession
 from .models.audit_schemas import AuditSession, StartAuditRequest
 from .models.deep_research_schemas import DeepResearchSession, StartDeepResearchRequest
+from .models.websearch_schemas import WebSearchSession, StartWebSearchRequest
+from .models.docs_schemas import DocRecord, DocsQARequest, DocsQAResult
 from .storage.session_store import session_store
 from .storage.review_store import review_store
 from .storage.audit_store import audit_store
 from .storage.deep_store import deep_store
 from .storage.auto_store import auto_store
 from .storage.lit_store import lit_store
+from .storage.websearch_store import websearch_store
 from .storage.artifact_store import (
     list_artifacts, read_artifact, list_all_sessions_with_artifacts
 )
@@ -652,6 +657,93 @@ async def get_global_graph() -> dict:
     data = await loop.run_in_executor(None, graph_store.get_global_graph_data)
     data["memgraph"] = True
     return data
+
+
+# ---------------------------------------------------------------------------
+# Docs endpoints (PDF / document Q&A)
+# ---------------------------------------------------------------------------
+
+_ALLOWED_DOC_EXTENSIONS = {".pdf", ".txt", ".md", ".tex"}
+_MAX_DOC_SIZE_MB = 50
+
+
+@app.post("/api/docs/upload", response_model=DocRecord)
+async def upload_document(file: UploadFile) -> DocRecord:
+    """Upload a PDF or text file — parses, chunks, and embeds it."""
+    import os as _os
+    ext = _os.path.splitext(file.filename or "")[1].lower()
+    if ext not in _ALLOWED_DOC_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{ext}'. Allowed: {', '.join(_ALLOWED_DOC_EXTENSIONS)}",
+        )
+    data = await file.read()
+    if len(data) > _MAX_DOC_SIZE_MB * 1024 * 1024:
+        raise HTTPException(status_code=413, detail=f"File exceeds {_MAX_DOC_SIZE_MB} MB limit.")
+    try:
+        record = await process_upload(file.filename or "document", data)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return record
+
+
+@app.get("/api/docs", response_model=list[DocRecord])
+async def list_documents() -> list[DocRecord]:
+    """Return all uploaded documents."""
+    rows = await db.docs_list_documents()
+    return [DocRecord(**r) for r in rows]
+
+
+@app.delete("/api/docs/{doc_id}")
+async def delete_document(doc_id: str) -> dict:
+    """Delete a document and all its chunks."""
+    deleted = await db.docs_delete_document(doc_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    return {"deleted": True, "doc_id": doc_id}
+
+
+@app.post("/api/docs/ask", response_model=DocsQAResult)
+async def ask_documents(body: DocsQARequest) -> DocsQAResult:
+    """Ask a question — answers grounded in uploaded documents via RAG."""
+    if not body.question.strip():
+        raise HTTPException(status_code=400, detail="question must not be empty.")
+    return await answer_question(body.question, top_k=min(body.top_k, 10))
+
+
+# ---------------------------------------------------------------------------
+# Web Search endpoints (Perplexity-like)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/websearch")
+async def start_websearch(body: StartWebSearchRequest, background_tasks: BackgroundTasks) -> dict:
+    """Start a Perplexity-like web search session."""
+    session = await websearch_store.create_session(body.input)
+    background_tasks.add_task(
+        run_websearch,
+        session_id=session.session_id,
+        user_input=body.input,
+        recency=body.recency,
+    )
+    return {"session_id": session.session_id}
+
+
+@app.get("/api/websearch/{session_id}", response_model=WebSearchSession)
+async def get_websearch_session(session_id: str) -> WebSearchSession:
+    s = await websearch_store.get_or_load_session(session_id)
+    if s is None:
+        raise HTTPException(status_code=404, detail="Web search session not found.")
+    return s
+
+
+@app.get("/api/websearch/{session_id}/stream")
+async def stream_websearch_session(session_id: str) -> EventSourceResponse:
+    return await _generic_stream(session_id, websearch_store)
+
+
+@app.get("/api/websearches")
+async def list_websearch_sessions(limit: int = 20) -> list[dict]:
+    return await websearch_store.list_sessions(limit=min(limit, 100))
 
 
 @app.post("/api/research")

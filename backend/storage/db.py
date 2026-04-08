@@ -130,6 +130,34 @@ async def init_pool() -> None:
                 )
                 """
             )
+            # Documents (PDF/text Q&A)
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS docs_documents (
+                    doc_id      TEXT PRIMARY KEY,
+                    title       TEXT        NOT NULL DEFAULT '',
+                    filename    TEXT        NOT NULL DEFAULT '',
+                    page_count  INTEGER     NOT NULL DEFAULT 0,
+                    chunk_count INTEGER     NOT NULL DEFAULT 0,
+                    size_bytes  INTEGER     NOT NULL DEFAULT 0,
+                    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS docs_chunks (
+                    chunk_id    SERIAL PRIMARY KEY,
+                    doc_id      TEXT        NOT NULL REFERENCES docs_documents(doc_id) ON DELETE CASCADE,
+                    chunk_index INTEGER     NOT NULL,
+                    content     TEXT        NOT NULL,
+                    embedding   JSONB       NOT NULL DEFAULT '[]'
+                )
+                """
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS docs_chunks_doc_idx ON docs_chunks(doc_id)"
+            )
             # Any session still marked 'running' from a previous process is dead.
             affected = await conn.execute(
                 "UPDATE sessions SET status = 'error' WHERE status = 'running'"
@@ -683,6 +711,111 @@ async def get_due_watches() -> list[dict]:
         return [dict(r) for r in rows]
     except Exception as exc:
         logger.warning("DB get_due_watches failed: %s", exc)
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Docs (PDF Q&A) helpers
+# ---------------------------------------------------------------------------
+
+async def docs_save_document(doc: dict) -> None:
+    """Upsert a document record."""
+    if _pool is None:
+        return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO docs_documents (doc_id, title, filename, page_count, chunk_count, size_bytes, created_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                ON CONFLICT (doc_id) DO UPDATE
+                    SET title = EXCLUDED.title, chunk_count = EXCLUDED.chunk_count
+                """,
+                doc["doc_id"], doc["title"], doc["filename"],
+                doc["page_count"], doc["chunk_count"], doc["size_bytes"],
+                _parse_dt(doc["created_at"]),
+            )
+    except Exception as exc:
+        logger.warning("docs_save_document failed: %s", exc)
+
+
+async def docs_save_chunks(doc_id: str, chunks: list[dict]) -> None:
+    """Insert chunks for a document (clears old ones first)."""
+    if _pool is None:
+        return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute("DELETE FROM docs_chunks WHERE doc_id = $1", doc_id)
+            await conn.executemany(
+                "INSERT INTO docs_chunks (doc_id, chunk_index, content, embedding) VALUES ($1, $2, $3, $4::jsonb)",
+                [
+                    (doc_id, c["chunk_index"], c["content"], json.dumps(c["embedding"]))
+                    for c in chunks
+                ],
+            )
+    except Exception as exc:
+        logger.warning("docs_save_chunks failed: %s", exc)
+
+
+async def docs_list_documents() -> list[dict]:
+    if _pool is None:
+        return []
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT doc_id, title, filename, page_count, chunk_count, size_bytes, created_at FROM docs_documents ORDER BY created_at DESC"
+            )
+        return [
+            {
+                "doc_id": r["doc_id"], "title": r["title"], "filename": r["filename"],
+                "page_count": r["page_count"], "chunk_count": r["chunk_count"],
+                "size_bytes": r["size_bytes"], "created_at": r["created_at"].isoformat(),
+            }
+            for r in rows
+        ]
+    except Exception as exc:
+        logger.warning("docs_list_documents failed: %s", exc)
+        return []
+
+
+async def docs_delete_document(doc_id: str) -> bool:
+    if _pool is None:
+        return False
+    try:
+        async with _pool.acquire() as conn:
+            result = await conn.execute("DELETE FROM docs_documents WHERE doc_id = $1", doc_id)
+        return result != "DELETE 0"
+    except Exception as exc:
+        logger.warning("docs_delete_document failed: %s", exc)
+        return False
+
+
+async def docs_get_all_chunks() -> list[dict]:
+    """Load all chunks with their embeddings for in-Python similarity search."""
+    if _pool is None:
+        return []
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT c.chunk_id, c.doc_id, c.chunk_index, c.content, c.embedding,
+                       d.title AS doc_title
+                FROM   docs_chunks c
+                JOIN   docs_documents d ON d.doc_id = c.doc_id
+                ORDER  BY c.doc_id, c.chunk_index
+                """
+            )
+        return [
+            {
+                "chunk_id": r["chunk_id"], "doc_id": r["doc_id"],
+                "chunk_index": r["chunk_index"], "content": r["content"],
+                "embedding": json.loads(r["embedding"]),
+                "doc_title": r["doc_title"],
+            }
+            for r in rows
+        ]
+    except Exception as exc:
+        logger.warning("docs_get_all_chunks failed: %s", exc)
         return []
 
 

@@ -2,6 +2,8 @@ import type {
   AuditSession, CompareResult, DeepResearchSession, DraftFormat, DraftResult,
   AutoResearchSession, LitSession, Depth, GraphData, KnowledgePaper,
   KnowledgeStats, ResearchSession, SessionArtifacts, SSEEvent,
+  WebSearchSession, WebSearchRecency,
+  DocRecord, DocsQAResult,
 } from '@/lib/types'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
@@ -354,6 +356,62 @@ export async function searchKnowledge(query: string, limit = 20): Promise<Knowle
 
 export async function getKnowledgeStats(): Promise<KnowledgeStats> {
   return fetchJSON<KnowledgeStats>('/api/knowledge/stats')
+}
+
+// ---------------------------------------------------------------------------
+// Docs API (PDF / document Q&A)
+// ---------------------------------------------------------------------------
+
+export async function uploadDocument(file: File): Promise<DocRecord> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(`${API_BASE_URL}/api/docs/upload`, { method: 'POST', body: form })
+  if (!res.ok) {
+    const text = await res.text().catch(() => 'Unknown error')
+    throw new Error(`Upload error ${res.status}: ${text}`)
+  }
+  return res.json()
+}
+
+export async function listDocuments(): Promise<DocRecord[]> {
+  return fetchJSON<DocRecord[]>('/api/docs')
+}
+
+export async function deleteDocument(docId: string): Promise<void> {
+  await fetchJSON(`/api/docs/${docId}`, { method: 'DELETE' })
+}
+
+export async function askDocuments(question: string, topK = 5): Promise<DocsQAResult> {
+  return fetchJSON<DocsQAResult>('/api/docs/ask', {
+    method: 'POST',
+    body: JSON.stringify({ question, top_k: topK }),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Web Search API (Perplexity-like)
+// ---------------------------------------------------------------------------
+
+export async function startWebSearch(
+  input: string,
+  recency: WebSearchRecency = 'any',
+): Promise<{ session_id: string }> {
+  return fetchJSON('/api/websearch', {
+    method: 'POST',
+    body: JSON.stringify({ input, recency }),
+  })
+}
+
+export async function getWebSearchSession(sessionId: string): Promise<WebSearchSession> {
+  return fetchJSON<WebSearchSession>(`/api/websearch/${sessionId}`)
+}
+
+export async function listWebSearchSessions(limit = 20): Promise<SessionSummary[]> {
+  return fetchJSON<SessionSummary[]>(`/api/websearches?limit=${limit}`)
+}
+
+export function streamWebSearchSession(sessionId: string, onEvent: (e: SSEEvent) => void): () => void {
+  return _streamGeneric(`/api/websearch/${sessionId}/stream`, onEvent)
 }
 
 // ---------------------------------------------------------------------------
