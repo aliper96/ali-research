@@ -94,7 +94,30 @@ if ($mgRunning) {
     }
 }
 
-# 5. Backend
+# 5. LaTeX Compiler
+Write-Header "LaTeX Compiler (Docker)"
+$latexRunning = docker ps --filter "name=ali_researcher-latex-compiler" --filter "status=running" -q 2>$null
+if (-not $latexRunning) {
+    $latexRunning = docker ps --filter "name=latex-compiler" --filter "status=running" -q 2>$null
+}
+if ($latexRunning) {
+    Write-Ok "LaTeX compiler already running on http://localhost:8001"
+} else {
+    Write-Step "Starting LaTeX compiler..."
+    Push-Location $Root
+    docker compose up -d latex-compiler 2>&1 | Out-Null
+    Pop-Location
+    Start-Sleep -Seconds 3
+    $latexRunning = docker ps --filter "name=latex-compiler" --filter "status=running" -q 2>$null
+    if ($latexRunning) {
+        Write-Ok "LaTeX compiler started on http://localhost:8001"
+    } else {
+        Write-Warn "LaTeX compiler failed to start - LaTeX Coach feature will be unavailable"
+        Write-Warn "  First run may take several minutes (downloading TeX Live ~1.5 GB)"
+    }
+}
+
+# 6. Backend
 Write-Header "Backend (FastAPI)"
 Write-Step "Starting uvicorn on http://localhost:8000 ..."
 $condaInit = "$env:USERPROFILE\miniconda3\shell\condabin\conda-hook.ps1"
@@ -113,13 +136,13 @@ try {
     Write-Warn "Backend still starting... check the terminal window"
 }
 
-# 6. Frontend
+# 7. Frontend
 Write-Header "Frontend (Next.js)"
 Write-Step "Starting Next.js on http://localhost:3000 ..."
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$Frontend'; npm run dev"
 Start-Sleep -Seconds 3
 
-# 7. Summary
+# 8. Summary
 Write-Host ""
 Write-Host "  All services launched!" -ForegroundColor Green
 Write-Host ""
@@ -131,6 +154,7 @@ Write-Host "   Global Net ->  http://localhost:3000/global-network" -ForegroundC
 Write-Host "   SearXNG    ->  http://localhost:8080" -ForegroundColor White
 Write-Host "   Memgraph   ->  bolt://localhost:7687" -ForegroundColor White
 Write-Host "   PostgreSQL ->  localhost:5432 / ali_researcher" -ForegroundColor White
+Write-Host "   LaTeX      ->  http://localhost:8001  (compilador Docker)" -ForegroundColor White
 Write-Host ""
 Write-Host "   To stop everything: .\stop.ps1" -ForegroundColor DarkGray
 Write-Host ""

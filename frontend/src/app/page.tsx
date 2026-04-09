@@ -3,7 +3,7 @@ import SessionHistory from '@/components/SessionHistory'
 import {
   BookOpen, Cpu, Database, Globe, FileText, FlaskConical,
   Bell, GitCompareArrows, RefreshCw, BookMarked, FolderOpen,
-  Brain, Search, BookOpenCheck, ArrowRight,
+  Brain, Search, BookOpenCheck, ArrowRight, FileCode2,
 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -50,6 +50,7 @@ const FEATURED = [
 
 // Secondary tools — compact chip row
 const SECONDARY = [
+  { href: '/latexcoach',   icon: FileCode2,        label: 'LaTeX Coach',   color: 'hover:text-emerald-300' },
   { href: '/review',       icon: FileText,         label: 'Review Paper',  color: 'hover:text-violet-300' },
   { href: '/audit',        icon: FlaskConical,     label: 'Audit Paper',   color: 'hover:text-amber-300' },
   { href: '/global-network', icon: Globe,          label: 'Global Network',color: 'hover:text-indigo-300' },

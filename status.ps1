@@ -46,5 +46,13 @@ if ($mgRunning) {
     Write-Down "Memgraph " "bolt://localhost:7687  (container not running)"
 }
 
+# LaTeX Compiler
+try {
+    $null = Invoke-WebRequest -Uri "http://localhost:8001/health" -TimeoutSec 3 -UseBasicParsing
+    Write-Ok "LaTeX    " "http://localhost:8001  (compilador activo)"
+} catch {
+    Write-Down "LaTeX    " "http://localhost:8001  (not responding — run: docker compose up -d latex-compiler)"
+}
+
 Write-Host "  ─────────────────────────────────────────" -ForegroundColor DarkGray
 Write-Host ""

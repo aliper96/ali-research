@@ -49,9 +49,13 @@ async def run_draft(session_result: dict, format: str = "brief", title: str = ""
             f"Gaps: {'; '.join(session_result.get('gap_analysis', []))}\n\n"
             "Write the full document in Markdown now."},
     ]
-    resp = await client.chat.completions.create(
-        model=model, max_completion_tokens=6000, messages=messages)  # type: ignore[arg-type]
-    content = resp.choices[0].message.content or ""
+    resp = await client.responses.create(
+        model=model,
+        instructions=messages[0]["content"],
+        input=messages[1]["content"],
+        max_output_tokens=6000,
+    )
+    content = resp.output_text or ""
     # Extract title from first heading if present
     import re
     heading = re.search(r"^#\s+(.+)$", content, re.MULTILINE)

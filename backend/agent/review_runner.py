@@ -96,7 +96,7 @@ async def _call_model(client: openai.AsyncOpenAI, messages: list[dict], *, tools
     model = os.getenv("LLM_MODEL", "gpt-5.4-nano")
     return await client.chat.completions.create(
         model=model,
-        max_completion_tokens=6000,
+        extra_body={"max_completion_tokens": 6000},
         tools=TOOL_SPECS if tools else openai.NOT_GIVEN,  # type: ignore[arg-type]
         messages=messages,  # type: ignore[arg-type]
     )

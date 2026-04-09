@@ -151,7 +151,7 @@ async def run_audit(session_id: str, user_input: str) -> None:
     async def _call_model(msgs: list[dict]) -> Any:
         return await client.chat.completions.create(
             model=model,
-            max_completion_tokens=4000,
+            extra_body={"max_completion_tokens": 4000},
             tools=TOOL_SPECS,  # type: ignore[arg-type]
             messages=msgs,  # type: ignore[arg-type]
         )

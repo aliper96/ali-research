@@ -321,7 +321,7 @@ async def run_research(
     async def _call_model(msgs: list[dict]) -> Any:
         return await client.chat.completions.create(
             model=model,
-            max_completion_tokens=8000,
+            extra_body={"max_completion_tokens": 8000},
             tools=TOOL_SPECS,  # type: ignore[arg-type]
             messages=msgs,  # type: ignore[arg-type]
         )

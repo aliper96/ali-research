@@ -46,6 +46,18 @@ if ($searxRunning) {
     Write-Step "SearXNG was not running"
 }
 
+# Stop LaTeX Compiler
+Write-Header "LaTeX Compiler"
+$latexRunning = docker ps --filter "name=latex-compiler" --filter "status=running" -q 2>$null
+if ($latexRunning) {
+    Push-Location $PSScriptRoot
+    docker compose stop latex-compiler | Out-Null
+    Pop-Location
+    Write-Ok "LaTeX compiler stopped"
+} else {
+    Write-Step "LaTeX compiler was not running"
+}
+
 # Stop Memgraph
 Write-Header "Memgraph"
 $mgRunning = docker ps --filter "name=memgraph" --filter "status=running" -q 2>$null

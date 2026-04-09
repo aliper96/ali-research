@@ -42,7 +42,6 @@ from sse_starlette.sse import EventSourceResponse
 
 load_dotenv(Path(__file__).parent / ".env")  # backend/.env — must come before imports
 
-from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from .agent.researcher import run_research
 from .agent.review_runner import run_review
@@ -55,7 +54,10 @@ from .agent.draft_runner import run_draft
 from .agent.paper_parser import parse_paper
 from .agent.websearch_runner import run_websearch
 from .agent.docs_runner import process_upload, answer_question
-from .agent.pdf_export import generate_research_pdf
+from .agent.pdf_export import generate_research_pdf, generate_review_pdf
+from .agent.latex_coach import run_latex_coach, generate_annotated_pdf
+from .storage.latex_store import latex_store
+from .models.latex_schemas import LatexCoachSession
 from .models.schemas import ResearchSession, StartResearchRequest
 from .models.review_schemas import ReviewSession
 from .models.audit_schemas import AuditSession, StartAuditRequest
@@ -249,6 +251,34 @@ async def stream_review_session(session_id: str) -> EventSourceResponse:
                 yield {"event": "progress", "data": json.dumps(event)}
 
     return EventSourceResponse(_events())
+
+
+@app.get("/api/review/{session_id}/export/pdf")
+async def export_review_pdf(session_id: str) -> Response:
+    """Generate and download a formatted PDF of the review results."""
+    session = await review_store.get_or_load_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Review session '{session_id}' not found.")
+    if session.status != "completed":
+        raise HTTPException(status_code=400, detail="Review session not yet completed.")
+
+    loop = asyncio.get_event_loop()
+    pdf_bytes = await loop.run_in_executor(
+        None,
+        generate_review_pdf,
+        session_id,
+        session,
+    )
+
+    slug = "".join(c if c.isalnum() or c in "-_ " else "" for c in (session.paper_title or "review"))
+    slug = slug[:40].strip().replace(" ", "-").lower()
+    filename = f"review-{slug or session_id[:8]}.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/api/reviews")
@@ -745,6 +775,182 @@ async def stream_websearch_session(session_id: str) -> EventSourceResponse:
 @app.get("/api/websearches")
 async def list_websearch_sessions(limit: int = 20) -> list[dict]:
     return await websearch_store.list_sessions(limit=min(limit, 100))
+
+
+# ---------------------------------------------------------------------------
+# LaTeX Coach endpoints
+# ---------------------------------------------------------------------------
+
+_MAX_LATEX_ZIP_MB = 50
+
+
+@app.post("/api/latexcoach/scan")
+async def scan_latex_zip(latex_zip: UploadFile) -> dict:
+    """
+    Escanea un .zip y devuelve los archivos .tex candidatos a ser el archivo principal
+    (los que contienen \\documentclass).
+    """
+    import zipfile as _zipfile, io as _io, re as _re
+
+    zip_bytes = await latex_zip.read()
+    candidates: list[dict] = []
+    total_tex = 0
+
+    try:
+        with _zipfile.ZipFile(_io.BytesIO(zip_bytes)) as z:
+            for info in z.infolist():
+                if not info.filename.endswith(".tex"):
+                    continue
+                total_tex += 1
+                try:
+                    content = z.read(info.filename).decode("utf-8", errors="ignore")
+                except Exception:
+                    continue
+                if r"\documentclass" not in content:
+                    continue
+                section_count = len(_re.findall(r"\\section(?:\*)?", content))
+                candidates.append({
+                    "filename": info.filename,
+                    "section_count": section_count,
+                    "size_kb": round(info.file_size / 1024, 1),
+                })
+    except _zipfile.BadZipFile:
+        raise HTTPException(status_code=400, detail="Archivo zip inválido o corrupto.")
+
+    # Ordenar: más secciones primero, luego por nombre
+    candidates.sort(key=lambda c: (-c["section_count"], c["filename"]))
+
+    return {"candidates": candidates, "total_tex_files": total_tex}
+
+
+@app.post("/api/latexcoach")
+async def start_latex_coach(
+    background_tasks: BackgroundTasks,
+    latex_zip: UploadFile,
+    main_tex: str = Form(default=""),
+) -> dict:
+    """
+    Sube un .zip con un proyecto LaTeX.
+    Opcionalmente acepta main_tex para especificar el archivo raíz
+    cuando el zip tiene varios .tex con \\documentclass.
+    """
+    if not (latex_zip.filename or "").endswith(".zip"):
+        raise HTTPException(status_code=400, detail="Se requiere un archivo .zip con el proyecto LaTeX.")
+
+    zip_bytes = await latex_zip.read()
+    if len(zip_bytes) > _MAX_LATEX_ZIP_MB * 1024 * 1024:
+        raise HTTPException(status_code=413, detail=f"El zip supera el límite de {_MAX_LATEX_ZIP_MB} MB.")
+
+    session = await latex_store.create_session(latex_zip.filename or "project.zip")
+
+    background_tasks.add_task(
+        run_latex_coach,
+        session_id=session.session_id,
+        zip_bytes=zip_bytes,
+        filename=latex_zip.filename or "project.zip",
+        main_tex=main_tex.strip(),
+    )
+
+    return {"session_id": session.session_id, "filename": session.filename}
+
+
+@app.get("/api/latexcoach/{session_id}", response_model=LatexCoachSession)
+async def get_latex_coach_session(session_id: str) -> LatexCoachSession:
+    session = await latex_store.get_or_load_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"LaTeX Coach session '{session_id}' not found.")
+    return session
+
+
+@app.get("/api/latexcoach/{session_id}/debug")
+async def debug_latex_coach_session(session_id: str) -> dict:
+    """Devuelve estado completo de la sesión incluyendo logs y errores para diagnóstico."""
+    session = await latex_store.get_or_load_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    return {
+        "session_id": session_id,
+        "status": session.status,
+        "error": session.error,
+        "progress_pct": session.progress.percentage,
+        "logs": [{"ts": l.timestamp, "level": l.level, "msg": l.message} for l in session.progress.logs],
+        "sections_count": len(session.sections),
+        "sections_errors": [
+            {"title": s.title, "issues": s.issues}
+            for s in session.sections
+            if any("failed" in (i or "").lower() or "error" in (i or "").lower() for i in s.issues)
+        ],
+        "model": __import__("os").getenv("LLM_MODEL", "gpt-5.4-nano"),
+    }
+
+
+@app.get("/api/latexcoach/{session_id}/stream")
+async def stream_latex_coach_session(session_id: str) -> EventSourceResponse:
+    return await _generic_stream(session_id, latex_store)
+
+
+@app.get("/api/latexcoaches")
+async def list_latex_coach_sessions(limit: int = 20) -> list[dict]:
+    return await latex_store.list_sessions(limit=min(limit, 100))
+
+
+@app.post("/api/latexcoach/{session_id}/annotated")
+async def request_annotated_pdf(session_id: str) -> dict:
+    """
+    (Re)genera el PDF anotado con sugerencias en rojo para una sesión completada.
+    Requiere que el zip original esté guardado en disco.
+    """
+    session = await latex_store.get_or_load_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    if session.status != "completed":
+        raise HTTPException(status_code=400, detail="Session not yet completed.")
+
+    zip_path = latex_store.get_zip_path(session_id)
+    if zip_path is None:
+        raise HTTPException(
+            status_code=410,
+            detail="Original zip not available on disk. Session may have been created before this feature.",
+        )
+
+    pdf_url = await generate_annotated_pdf(session_id)
+    if pdf_url is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Annotated PDF generation failed. Check that the LaTeX compiler service is running.",
+        )
+    return {"annotated_pdf_url": pdf_url}
+
+
+@app.post("/api/latexcoach/{session_id}/reanalyze")
+async def reanalyze_latex_coach(
+    session_id: str,
+    background_tasks: BackgroundTasks,
+    main_tex: str = Query(default=""),
+) -> dict:
+    """
+    Re-ejecuta el análisis completo de una sesión existente usando el zip guardado en disco.
+    Útil cuando el análisis previo falló o el código fue actualizado.
+    """
+    zip_bytes = latex_store.get_zip_bytes(session_id)
+    if zip_bytes is None:
+        raise HTTPException(
+            status_code=410,
+            detail="Original zip not available on disk. Please upload the project again.",
+        )
+
+    session = await latex_store.reset_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    background_tasks.add_task(
+        run_latex_coach,
+        session_id=session_id,
+        zip_bytes=zip_bytes,
+        filename=session.filename,
+        main_tex=main_tex.strip(),
+    )
+    return {"session_id": session_id, "status": "restarted"}
 
 
 @app.post("/api/research")

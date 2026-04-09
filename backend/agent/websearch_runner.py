@@ -414,15 +414,13 @@ async def _generate_queries(client: openai.AsyncOpenAI, model: str, question: st
     from datetime import date
     year = date.today().year
     try:
-        resp = await client.chat.completions.create(
+        resp = await client.responses.create(
             model=model,
-            max_completion_tokens=400,
-            messages=[
-                {"role": "system", "content": _QUERY_GEN_PROMPT.format(year=year)},
-                {"role": "user", "content": question},
-            ],
+            instructions=_QUERY_GEN_PROMPT.format(year=year),
+            input=question,
+            max_output_tokens=400,
         )
-        text = (resp.choices[0].message.content or "").strip()
+        text = (resp.output_text or "").strip()
         match = re.search(r"\[.*?\]", text, re.DOTALL)
         if match:
             queries = json.loads(match.group())
@@ -478,21 +476,16 @@ async def _synthesize(
     sources: list[WebSource],
 ) -> tuple[str, list[str]]:
     try:
-        resp = await client.chat.completions.create(
+        resp = await client.responses.create(
             model=model,
-            max_completion_tokens=4000,
-            messages=[
-                {"role": "system", "content": _SYNTHESIS_PROMPT},
-                {
-                    "role": "user",
-                    "content": (
-                        f"User question (answer in THIS language): {question}\n\n"
-                        f"Sources:\n{_build_context(sources)}"
-                    ),
-                },
-            ],
+            instructions=_SYNTHESIS_PROMPT,
+            input=(
+                f"User question (answer in THIS language): {question}\n\n"
+                f"Sources:\n{_build_context(sources)}"
+            ),
+            max_output_tokens=4000,
         )
-        text = (resp.choices[0].message.content or "").strip()
+        text = (resp.output_text or "").strip()
         # Extract JSON — handle possible markdown fences
         text = re.sub(r"^```(?:json)?\s*", "", text)
         text = re.sub(r"\s*```$", "", text)

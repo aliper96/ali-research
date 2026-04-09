@@ -103,10 +103,11 @@ def _make_client() -> openai.AsyncOpenAI:
 
 async def _run_llm(client: openai.AsyncOpenAI, messages: list[dict],
                    max_tokens: int = 4000, tools: list | None = None) -> Any:
+    extra: dict[str, Any] = {"max_completion_tokens": max_tokens}
     kwargs: dict[str, Any] = dict(
         model=os.getenv("LLM_MODEL", "gpt-5.4-nano"),
-        max_completion_tokens=max_tokens,
         messages=messages,  # type: ignore[arg-type]
+        extra_body=extra,
     )
     if tools:
         kwargs["tools"] = tools  # type: ignore[assignment]

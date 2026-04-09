@@ -5,11 +5,251 @@ import { useParams, useRouter } from 'next/navigation'
 import {
   ArrowLeft, CheckCircle2, XCircle, Clock, AlertTriangle, FileText,
   ChevronDown, ChevronUp, Star, Zap, Users, BookOpen, Target,
+  Share2, Copy, Check, Download, Loader2, X,
 } from 'lucide-react'
 import Link from 'next/link'
-import { getReviewSession, streamReview, type ReviewSession, type ReviewerReport, type EditorReport } from '@/lib/api'
+import { getReviewSession, streamReview, type ReviewSession, type ReviewerReport, type EditorReport, API_BASE_URL } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import MarkdownContent from '@/components/MarkdownContent'
+
+// ---------------------------------------------------------------------------
+// Share helpers
+// ---------------------------------------------------------------------------
+
+const REC_LABEL_MAP: Record<string, string> = {
+  accept: 'Accept',
+  minor_revision: 'Minor Revision',
+  major_revision: 'Major Revision',
+  reject: 'Reject',
+}
+
+function buildReviewMarkdown(session: ReviewSession): string {
+  const lines: string[] = []
+  lines.push(`# Peer Review — ${session.paper_title || 'Untitled'}`)
+  lines.push(``)
+  if (session.editor_report) {
+    const ed = session.editor_report
+    lines.push(`## Editor's Decision`)
+    lines.push(``)
+    lines.push(`**Decision:** ${REC_LABEL_MAP[ed.final_recommendation] ?? ed.final_recommendation}`)
+    if (ed.novelty_verdict)  lines.push(`**Novelty:** ${ed.novelty_verdict}`)
+    if (ed.publishability)   lines.push(`**Publishability:** ${ed.publishability}`)
+    lines.push(`**Reviewer agreement:** ${(ed.reviewer_agreement * 100).toFixed(0)}%`)
+    lines.push(``)
+    lines.push(`**Scores:** Novelty ${ed.novelty_score.toFixed(1)} | Technical ${ed.technical_score.toFixed(1)} | Clarity ${ed.clarity_score.toFixed(1)} | Contribution ${ed.contribution_score.toFixed(1)}`)
+    lines.push(``)
+    if (ed.consensus_summary) {
+      lines.push(`### Consensus Summary`)
+      lines.push(``)
+      lines.push(ed.consensus_summary)
+      lines.push(``)
+    }
+    if (ed.action_items.length > 0) {
+      lines.push(`### Required Actions`)
+      lines.push(``)
+      ed.action_items.forEach((item, i) => lines.push(`${i + 1}. ${item}`))
+      lines.push(``)
+    }
+    if (ed.major_issues.length > 0) {
+      lines.push(`### Major Issues`)
+      lines.push(``)
+      ed.major_issues.forEach(s => lines.push(`- ${s}`))
+      lines.push(``)
+    }
+    if (ed.minor_issues.length > 0) {
+      lines.push(`### Minor Issues`)
+      lines.push(``)
+      ed.minor_issues.forEach(s => lines.push(`- ${s}`))
+      lines.push(``)
+    }
+    if (ed.strengths.length > 0) {
+      lines.push(`### Strengths`)
+      lines.push(``)
+      ed.strengths.forEach(s => lines.push(`- ${s}`))
+      lines.push(``)
+    }
+  }
+
+  const done = session.reviewer_reports.filter(r => r.status === 'done')
+  if (done.length > 0) {
+    lines.push(`---`)
+    lines.push(``)
+    lines.push(`## Individual Reviews`)
+    lines.push(``)
+    done.forEach(report => {
+      lines.push(`### Reviewer ${report.reviewer_id}`)
+      if (report.persona) lines.push(`*${report.persona}*`)
+      lines.push(``)
+      lines.push(`**Recommendation:** ${REC_LABEL_MAP[report.recommendation] ?? report.recommendation}  |  **Overall:** ${report.overall_score.toFixed(1)}/10`)
+      lines.push(`**Scores:** Novelty ${report.novelty_score.toFixed(1)} | Technical ${report.technical_score.toFixed(1)} | Clarity ${report.clarity_score.toFixed(1)} | Contribution ${report.contribution_score.toFixed(1)}`)
+      lines.push(``)
+      if (report.summary) {
+        lines.push(report.summary)
+        lines.push(``)
+      }
+      if (report.major_issues.length > 0) {
+        lines.push(`**Major issues:**`)
+        report.major_issues.forEach(s => lines.push(`- ${s}`))
+        lines.push(``)
+      }
+      if (report.minor_issues.length > 0) {
+        lines.push(`**Minor issues:**`)
+        report.minor_issues.forEach(s => lines.push(`- ${s}`))
+        lines.push(``)
+      }
+      if (report.strengths.length > 0) {
+        lines.push(`**Strengths:**`)
+        report.strengths.forEach(s => lines.push(`- ${s}`))
+        lines.push(``)
+      }
+      if (report.missing_citations.length > 0) {
+        lines.push(`**Missing citations:**`)
+        report.missing_citations.forEach(s => lines.push(`- ${s}`))
+        lines.push(``)
+      }
+    })
+  }
+
+  if (session.paper_abstract) {
+    lines.push(`---`)
+    lines.push(``)
+    lines.push(`## Paper Abstract`)
+    lines.push(``)
+    lines.push(session.paper_abstract)
+    lines.push(``)
+  }
+
+  return lines.join('\n')
+}
+
+function downloadFile(content: string, filename: string, type = 'text/markdown') {
+  const blob = new Blob([content], { type })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function ReviewShareModal({
+  session,
+  sessionId,
+  onClose,
+}: {
+  session: ReviewSession
+  sessionId: string
+  onClose: () => void
+}) {
+  const [copiedLink, setCopiedLink] = useState(false)
+  const [copiedText, setCopiedText] = useState(false)
+  const [pdfLoading, setPdfLoading] = useState(false)
+
+  const pageUrl = typeof window !== 'undefined' ? window.location.href : ''
+
+  const handleCopyLink = async () => {
+    await navigator.clipboard.writeText(pageUrl)
+    setCopiedLink(true)
+    setTimeout(() => setCopiedLink(false), 2000)
+  }
+
+  const handleCopyText = async () => {
+    const md = buildReviewMarkdown(session)
+    await navigator.clipboard.writeText(md)
+    setCopiedText(true)
+    setTimeout(() => setCopiedText(false), 2000)
+  }
+
+  const handleDownloadMarkdown = () => {
+    const md = buildReviewMarkdown(session)
+    const slug = (session.paper_title || 'review')
+      .replace(/[^a-z0-9]+/gi, '-')
+      .toLowerCase()
+      .slice(0, 40)
+    downloadFile(md, `review-${slug}.md`)
+  }
+
+  const handleDownloadPdf = async () => {
+    setPdfLoading(true)
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/review/${sessionId}/export/pdf`)
+      if (!res.ok) throw new Error('PDF export failed')
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const slug = (session.paper_title || 'review')
+        .replace(/[^a-z0-9]+/gi, '-')
+        .toLowerCase()
+        .slice(0, 40)
+      a.download = `review-${slug}.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
+    } finally {
+      setPdfLoading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="text-sm font-semibold text-slate-100">Share Review</h3>
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 transition-colors">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-2">
+          {/* Copy link */}
+          <button
+            onClick={handleCopyLink}
+            className="w-full flex items-center gap-3 rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-3 text-left text-sm hover:bg-slate-800 hover:border-violet-600/50 transition-all"
+          >
+            {copiedLink ? <Check className="h-4 w-4 text-green-400 flex-shrink-0" /> : <Copy className="h-4 w-4 text-violet-400 flex-shrink-0" />}
+            <span className={copiedLink ? 'text-green-300' : 'text-slate-200'}>
+              {copiedLink ? 'Link copied!' : 'Copy link'}
+            </span>
+          </button>
+
+          {/* Copy review text */}
+          <button
+            onClick={handleCopyText}
+            className="w-full flex items-center gap-3 rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-3 text-left text-sm hover:bg-slate-800 hover:border-violet-600/50 transition-all"
+          >
+            {copiedText ? <Check className="h-4 w-4 text-green-400 flex-shrink-0" /> : <Copy className="h-4 w-4 text-violet-400 flex-shrink-0" />}
+            <span className={copiedText ? 'text-green-300' : 'text-slate-200'}>
+              {copiedText ? 'Copied!' : 'Copy full review text'}
+            </span>
+          </button>
+
+          {/* Download markdown */}
+          <button
+            onClick={handleDownloadMarkdown}
+            className="w-full flex items-center gap-3 rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-3 text-left text-sm hover:bg-slate-800 hover:border-violet-600/50 transition-all"
+          >
+            <Download className="h-4 w-4 text-violet-400 flex-shrink-0" />
+            <span className="text-slate-200">Download Markdown (.md)</span>
+          </button>
+
+          {/* Download PDF */}
+          <button
+            onClick={handleDownloadPdf}
+            disabled={pdfLoading}
+            className="w-full flex items-center gap-3 rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-3 text-left text-sm hover:bg-slate-800 hover:border-violet-600/50 transition-all disabled:opacity-60"
+          >
+            {pdfLoading
+              ? <Loader2 className="h-4 w-4 text-violet-400 animate-spin flex-shrink-0" />
+              : <Download className="h-4 w-4 text-violet-400 flex-shrink-0" />
+            }
+            <span className="text-slate-200">{pdfLoading ? 'Generating PDF…' : 'Download PDF'}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -321,6 +561,7 @@ export default function ReviewSessionPage() {
   const { id } = useParams<{ id: string }>()
   const [session, setSession] = useState<ReviewSession | null>(null)
   const [loading, setLoading] = useState(true)
+  const [shareOpen, setShareOpen] = useState(false)
   const cleanupRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
@@ -378,6 +619,13 @@ export default function ReviewSessionPage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-[#030712] text-slate-100">
+      {shareOpen && session.status === 'completed' && (
+        <ReviewShareModal
+          session={session}
+          sessionId={id}
+          onClose={() => setShareOpen(false)}
+        />
+      )}
       <header className="sticky top-0 z-10 border-b border-slate-800/60 bg-slate-950/80 backdrop-blur-sm">
         <div className="mx-auto flex max-w-3xl items-center gap-4 px-6 py-4">
           <Link href="/review" className="flex items-center gap-2 text-slate-400 hover:text-slate-200 transition-colors text-sm">
@@ -395,6 +643,15 @@ export default function ReviewSessionPage() {
               </span>
               {doneCount}/{session.num_reviewers} done
             </div>
+          )}
+          {session.status === 'completed' && (
+            <button
+              onClick={() => setShareOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-xs text-slate-300 hover:border-violet-600/50 hover:text-violet-300 transition-all flex-shrink-0"
+            >
+              <Share2 className="h-3.5 w-3.5" />
+              Share
+            </button>
           )}
         </div>
       </header>

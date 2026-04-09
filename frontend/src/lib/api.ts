@@ -415,6 +415,142 @@ export function streamWebSearchSession(sessionId: string, onEvent: (e: SSEEvent)
 }
 
 // ---------------------------------------------------------------------------
+// LaTeX Coach API
+// ---------------------------------------------------------------------------
+
+export interface TextSuggestion {
+  type: 'rewrite' | 'add' | 'remove' | 'expand'
+  file: string
+  start_line: number
+  end_line: number
+  target_text: string
+  replacement: string
+  reason: string
+}
+
+export interface SectionAnalysis {
+  title: string
+  file: string
+  start_line: number
+  score_clarity: number
+  score_rigor: number
+  score_completeness: number
+  issues: string[]
+  suggestions: TextSuggestion[]
+}
+
+export interface LatexStructure {
+  tables: Array<{ file: string; caption: string; label: string }>
+  figures: Array<{ file: string; caption: string; label: string }>
+  citations: string[]
+  labels: string[]
+  undefined_refs: string[]
+}
+
+export interface SuggestedTable {
+  title: string
+  rationale: string
+  latex: string
+}
+
+export interface SuggestedFigure {
+  title: string
+  description: string
+  placement: string
+}
+
+export interface GlobalAssessment {
+  novelty: number
+  clarity: number
+  experimental_rigor: number
+  submission_readiness: number
+  overall: number
+  top_priorities: string[]
+  submission_checklist: string[]
+  verdict: string
+}
+
+export interface CompilationResult {
+  success: boolean
+  log: string
+  pdf_url: string | null
+  errors: string[]
+  warnings: string[]
+}
+
+export interface LatexCoachSession {
+  session_id: string
+  status: 'running' | 'completed' | 'error'
+  filename: string
+  paper_title: string
+  compilation: CompilationResult | null
+  structure: LatexStructure | null
+  sections: SectionAnalysis[]
+  suggested_tables: SuggestedTable[]
+  suggested_figures: SuggestedFigure[]
+  weak_claims: string[]
+  global_assessment: GlobalAssessment | null
+  annotated_pdf_url: string | null
+  created_at: string
+  progress: { percentage: number; logs: Array<{ timestamp: string; message: string; level: string }> }
+  error?: string
+}
+
+export interface LatexCandidate {
+  filename: string
+  section_count: number
+  size_kb: number
+}
+
+export interface LatexScanResult {
+  candidates: LatexCandidate[]
+  total_tex_files: number
+}
+
+export async function scanLatexZip(zipFile: File): Promise<LatexScanResult> {
+  const form = new FormData()
+  form.append('latex_zip', zipFile)
+  const res = await fetch(`${API_BASE_URL}/api/latexcoach/scan`, { method: 'POST', body: form })
+  if (!res.ok) throw new Error('Scan failed')
+  return res.json()
+}
+
+export async function startLatexCoach(
+  zipFile: File,
+  mainTex?: string,
+): Promise<{ session_id: string; filename: string }> {
+  const form = new FormData()
+  form.append('latex_zip', zipFile)
+  if (mainTex) form.append('main_tex', mainTex)
+  const res = await fetch(`${API_BASE_URL}/api/latexcoach`, { method: 'POST', body: form })
+  if (!res.ok) {
+    const text = await res.text().catch(() => 'Unknown error')
+    throw new Error(`API error ${res.status}: ${text}`)
+  }
+  return res.json()
+}
+
+export async function getLatexCoachSession(sessionId: string): Promise<LatexCoachSession> {
+  return fetchJSON<LatexCoachSession>(`/api/latexcoach/${sessionId}`)
+}
+
+export function streamLatexCoach(sessionId: string, onEvent: (e: SSEEvent) => void): () => void {
+  return _streamGeneric(`/api/latexcoach/${sessionId}/stream`, onEvent)
+}
+
+export async function requestAnnotatedPdf(sessionId: string): Promise<{ annotated_pdf_url: string }> {
+  return fetchJSON<{ annotated_pdf_url: string }>(`/api/latexcoach/${sessionId}/annotated`, {
+    method: 'POST',
+  })
+}
+
+export async function reanalyzeLatexCoach(sessionId: string): Promise<{ session_id: string; status: string }> {
+  return fetchJSON<{ session_id: string; status: string }>(`/api/latexcoach/${sessionId}/reanalyze`, {
+    method: 'POST',
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Internal SSE helper
 // ---------------------------------------------------------------------------
 

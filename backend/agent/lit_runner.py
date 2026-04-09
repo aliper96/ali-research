@@ -56,7 +56,7 @@ async def run_lit_review(session_id: str, user_input: str, depth: str = "deep") 
 
     async def _call():
         return await client.chat.completions.create(
-            model=model, max_completion_tokens=8000,
+            model=model, extra_body={"max_completion_tokens": 8000},
             tools=TOOL_SPECS, messages=messages)  # type: ignore[arg-type]
 
     try:

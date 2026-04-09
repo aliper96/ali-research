@@ -10,7 +10,7 @@ from fpdf import FPDF
 
 if TYPE_CHECKING:
     from ..models.schemas import ResearchResult
-    from ..models.review_schemas import ReviewSession
+    from ..models.review_schemas import ReviewSession, EditorReport, ReviewerReport
 
 _INDIGO   = (79, 70, 229)
 _INDIGO_L = (237, 238, 255)   # light indigo fill
@@ -250,5 +250,281 @@ def generate_research_pdf(
             pdf.multi_cell(page_w, 5.5, _safe(step.description))
             pdf.set_text_color(0, 0, 0)
             pdf.ln(4)
+
+    return bytes(pdf.output())
+
+
+# ---------------------------------------------------------------------------
+# Review PDF
+# ---------------------------------------------------------------------------
+
+_REC_LABEL = {
+    "accept":         "Accept",
+    "minor_revision": "Minor Revision",
+    "major_revision": "Major Revision",
+    "reject":         "Reject",
+}
+_REC_COLOR: dict[str, tuple[int, int, int]] = {
+    "accept":         (22,  163,  74),
+    "minor_revision": (14,  165, 233),
+    "major_revision": (202, 138,   4),
+    "reject":         (185,  28,  28),
+}
+
+
+def _score_bar(pdf: _PDF, label: str, value: float, page_w: float) -> None:
+    """Draw a labelled score bar (0-10)."""
+    half = (page_w - 6) / 2
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(*_GRAY)
+    pdf.cell(half * 0.55, 5, _safe(label))
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_text_color(*_INDIGO)
+    pdf.cell(half * 0.25, 5, f"{value:.1f}/10", align="R")
+    # mini bar
+    bar_w = half * 0.20
+    bar_x = pdf.get_x() + 2
+    bar_y = pdf.get_y() + 1.5
+    pdf.set_fill_color(*_LGRAY)
+    pdf.rect(bar_x, bar_y, bar_w, 2.5, "F")
+    filled = bar_w * (value / 10)
+    pdf.set_fill_color(*_INDIGO)
+    if filled > 0:
+        pdf.rect(bar_x, bar_y, filled, 2.5, "F")
+    pdf.ln(5)
+    pdf.set_text_color(0, 0, 0)
+
+
+def _bullet_list(pdf: _PDF, items: list[str], page_w: float,
+                 color: tuple[int, int, int], symbol: str = "•") -> None:
+    bw = 6
+    for item in items:
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(*color)
+        pdf.cell(bw, 5.5, symbol)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(50, 50, 60)
+        pdf.multi_cell(page_w - bw, 5.5, _safe(item))
+    pdf.set_text_color(0, 0, 0)
+
+
+def generate_review_pdf(session_id: str, session: "ReviewSession") -> bytes:
+    """Generate a formatted PDF for a completed peer review session."""
+    from ..models.review_schemas import EditorReport  # local import to avoid circular
+
+    date_str = datetime.now().strftime("%B %d, %Y")
+    page_w = 210 - _LM - _RM
+
+    pdf = _PDF()
+    pdf.sid = session_id
+    pdf.set_margins(_LM, _TM, _RM)
+    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.add_page()
+
+    # ── Title ───────────────────────────────────────────────────────────────
+    pdf.set_font("Helvetica", "B", 15)
+    pdf.set_text_color(*_INDIGO)
+    pdf.multi_cell(page_w, 9, _safe(session.paper_title or "Untitled Paper", 200))
+    pdf.set_font("Helvetica", "", 8.5)
+    pdf.set_text_color(*_GRAY)
+    pdf.multi_cell(page_w, 5.5,
+                   f"Session: {session_id}  |  Generated: {date_str}  |  ali_researcher  ·  Peer Review")
+    pdf.ln(3)
+
+    # Stats bar
+    done_count = sum(1 for r in session.reviewer_reports if r.status == "done")
+    pdf.set_fill_color(*_INDIGO_L)
+    pdf.set_text_color(*_INDIGO)
+    pdf.set_font("Helvetica", "B", 9)
+    stats = (f"  {done_count}/{session.num_reviewers} reviewers"
+             f"   |   status: {session.status}")
+    if session.editor_report:
+        rec = session.editor_report.final_recommendation
+        stats += f"   |   decision: {_REC_LABEL.get(rec, rec)}"
+    pdf.cell(page_w, 9, stats, fill=True, new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(6)
+
+    # ── Editor's Decision ────────────────────────────────────────────────────
+    ed: EditorReport | None = session.editor_report
+    if ed:
+        _section(pdf, "Editor's Decision")
+
+        rec = ed.final_recommendation
+        rec_r, rec_g, rec_b = _REC_COLOR.get(rec, _GRAY)
+
+        # Recommendation badge row
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.set_text_color(rec_r, rec_g, rec_b)
+        pdf.cell(0, 7, _REC_LABEL.get(rec, rec), new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(0, 0, 0)
+
+        # Metadata row
+        meta_parts = []
+        if ed.novelty_verdict:   meta_parts.append(f"Novelty: {_safe(ed.novelty_verdict)}")
+        if ed.publishability:    meta_parts.append(f"Publishability: {_safe(ed.publishability)}")
+        meta_parts.append(f"Reviewer agreement: {int(ed.reviewer_agreement * 100)}%")
+        pdf.set_font("Helvetica", "I", 8.5)
+        pdf.set_text_color(*_GRAY)
+        pdf.cell(0, 6, "  |  ".join(meta_parts), new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(0, 0, 0)
+        pdf.ln(3)
+
+        # Score grid (2 columns)
+        scores = [
+            ("Novelty",      ed.novelty_score),
+            ("Technical",    ed.technical_score),
+            ("Clarity",      ed.clarity_score),
+            ("Contribution", ed.contribution_score),
+        ]
+        col_w = page_w / 2
+        for i, (lbl, val) in enumerate(scores):
+            if i % 2 == 0 and i > 0:
+                pdf.ln(1)
+            _score_bar(pdf, lbl, val, col_w)
+        pdf.ln(3)
+
+        # Consensus summary
+        if ed.consensus_summary:
+            pdf.set_font("Helvetica", "", 9.5)
+            pdf.set_fill_color(248, 248, 255)
+            y0 = pdf.get_y()
+            pdf.multi_cell(page_w, 5.8, _safe(ed.consensus_summary), fill=True)
+            pdf.set_draw_color(*_INDIGO)
+            pdf.set_line_width(1.0)
+            pdf.line(_LM, y0, _LM, pdf.get_y())
+            pdf.set_line_width(0.2)
+            pdf.ln(4)
+
+        # Action items
+        if ed.action_items:
+            pdf.set_font("Helvetica", "B", 9)
+            pdf.set_text_color(*_GRAY)
+            pdf.cell(0, 6, "Required actions for authors:", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_text_color(0, 0, 0)
+            for i, item in enumerate(ed.action_items, 1):
+                bw = 8
+                pdf.set_font("Helvetica", "B", 9)
+                pdf.set_text_color(*_INDIGO)
+                pdf.cell(bw, 5.5, f"{i}.")
+                pdf.set_font("Helvetica", "", 9)
+                pdf.set_text_color(50, 50, 60)
+                pdf.multi_cell(page_w - bw, 5.5, _safe(item))
+            pdf.set_text_color(0, 0, 0)
+            pdf.ln(3)
+
+        # Consolidated issues / strengths
+        if ed.major_issues:
+            pdf.set_font("Helvetica", "B", 8.5)
+            pdf.set_text_color(185, 28, 28)
+            pdf.cell(0, 6, f"MAJOR ISSUES ({len(ed.major_issues)})", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_text_color(0, 0, 0)
+            _bullet_list(pdf, ed.major_issues, page_w, (185, 28, 28), "✗")
+            pdf.ln(2)
+        if ed.minor_issues:
+            pdf.set_font("Helvetica", "B", 8.5)
+            pdf.set_text_color(202, 138, 4)
+            pdf.cell(0, 6, f"MINOR ISSUES ({len(ed.minor_issues)})", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_text_color(0, 0, 0)
+            _bullet_list(pdf, ed.minor_issues, page_w, (202, 138, 4), "!")
+            pdf.ln(2)
+        if ed.strengths:
+            pdf.set_font("Helvetica", "B", 8.5)
+            pdf.set_text_color(22, 163, 74)
+            pdf.cell(0, 6, f"STRENGTHS ({len(ed.strengths)})", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_text_color(0, 0, 0)
+            _bullet_list(pdf, ed.strengths, page_w, (22, 163, 74), "+")
+            pdf.ln(2)
+
+    # ── Individual Reviewer Reports ──────────────────────────────────────────
+    done_reports = [r for r in session.reviewer_reports if r.status == "done"]
+    if done_reports:
+        pdf.add_page()
+        _section(pdf, f"Individual Reviews ({len(done_reports)})")
+
+        for idx, report in enumerate(done_reports):
+            if pdf.get_y() > 248:
+                pdf.add_page()
+
+            rec = report.recommendation
+            rec_r, rec_g, rec_b = _REC_COLOR.get(rec, _GRAY)
+
+            # Reviewer header
+            pdf.set_font("Helvetica", "B", 10)
+            pdf.set_text_color(*_INDIGO)
+            pdf.cell(0, 7, f"Reviewer {report.reviewer_id}", new_x="LMARGIN", new_y="NEXT")
+
+            if report.persona:
+                pdf.set_font("Helvetica", "I", 8.5)
+                pdf.set_text_color(*_GRAY)
+                pdf.cell(0, 5, _safe(report.persona, 120), new_x="LMARGIN", new_y="NEXT")
+
+            # Rec + overall score
+            pdf.set_font("Helvetica", "B", 9)
+            pdf.set_text_color(rec_r, rec_g, rec_b)
+            pdf.cell(0, 5.5, f"{_REC_LABEL.get(rec, rec)}  ·  Overall: {report.overall_score:.1f}/10",
+                     new_x="LMARGIN", new_y="NEXT")
+            pdf.set_text_color(0, 0, 0)
+            pdf.ln(2)
+
+            # Score bars (2-column layout)
+            scores = [
+                ("Novelty",      report.novelty_score),
+                ("Technical",    report.technical_score),
+                ("Clarity",      report.clarity_score),
+                ("Contribution", report.contribution_score),
+            ]
+            col_w = page_w / 2
+            for lbl, val in scores:
+                _score_bar(pdf, lbl, val, col_w)
+            pdf.ln(2)
+
+            # Summary
+            if report.summary:
+                pdf.set_font("Helvetica", "", 9)
+                pdf.set_text_color(50, 50, 60)
+                pdf.multi_cell(page_w, 5.5, _safe(report.summary, 600))
+                pdf.set_text_color(0, 0, 0)
+                pdf.ln(2)
+
+            # Issues / Strengths
+            if report.major_issues:
+                pdf.set_font("Helvetica", "B", 8.5)
+                pdf.set_text_color(185, 28, 28)
+                pdf.cell(0, 5, "Major issues:", new_x="LMARGIN", new_y="NEXT")
+                pdf.set_text_color(0, 0, 0)
+                _bullet_list(pdf, report.major_issues, page_w, (185, 28, 28), "✗")
+            if report.minor_issues:
+                pdf.set_font("Helvetica", "B", 8.5)
+                pdf.set_text_color(202, 138, 4)
+                pdf.cell(0, 5, "Minor issues:", new_x="LMARGIN", new_y="NEXT")
+                pdf.set_text_color(0, 0, 0)
+                _bullet_list(pdf, report.minor_issues, page_w, (202, 138, 4), "!")
+            if report.strengths:
+                pdf.set_font("Helvetica", "B", 8.5)
+                pdf.set_text_color(22, 163, 74)
+                pdf.cell(0, 5, "Strengths:", new_x="LMARGIN", new_y="NEXT")
+                pdf.set_text_color(0, 0, 0)
+                _bullet_list(pdf, report.strengths, page_w, (22, 163, 74), "+")
+            if report.missing_citations:
+                pdf.set_font("Helvetica", "B", 8.5)
+                pdf.set_text_color(14, 165, 233)
+                pdf.cell(0, 5, "Missing citations:", new_x="LMARGIN", new_y="NEXT")
+                pdf.set_text_color(0, 0, 0)
+                _bullet_list(pdf, report.missing_citations, page_w, _GRAY)
+
+            pdf.ln(3)
+            if idx < len(done_reports) - 1:
+                _divider(pdf)
+                pdf.ln(2)
+
+    # ── Abstract ─────────────────────────────────────────────────────────────
+    if session.paper_abstract:
+        pdf.add_page()
+        _section(pdf, "Paper Abstract")
+        pdf.set_font("Helvetica", "", 9.5)
+        pdf.set_text_color(50, 50, 60)
+        pdf.multi_cell(page_w, 5.8, _safe(session.paper_abstract, 3000))
+        pdf.set_text_color(0, 0, 0)
 
     return bytes(pdf.output())

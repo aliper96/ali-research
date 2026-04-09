@@ -59,9 +59,13 @@ async def run_compare(items: list[str], context: str = "") -> dict:
             f"Compare these items:\n" + "\n".join(f"- {i}" for i in enriched_items) +
             (f"\n\nContext: {context}" if context else "")},
     ]
-    resp = await client.chat.completions.create(
-        model=model, max_completion_tokens=4000, messages=messages)  # type: ignore[arg-type]
-    text = resp.choices[0].message.content or ""
+    resp = await client.responses.create(
+        model=model,
+        instructions=messages[0]["content"],
+        input=messages[1]["content"],
+        max_output_tokens=4000,
+    )
+    text = resp.output_text or ""
     data = _extract_json(text)
     if data:
         return data

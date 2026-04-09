@@ -173,15 +173,13 @@ async def _synthesize_qa(
 ) -> str:
     context = _build_qa_context(chunks)
     try:
-        resp = await client.chat.completions.create(
+        resp = await client.responses.create(
             model=model,
-            max_completion_tokens=2000,
-            messages=[
-                {"role": "system", "content": _QA_SYSTEM},
-                {"role": "user", "content": f"Question: {question}\n\nDocuments:\n{context}"},
-            ],
+            instructions=_QA_SYSTEM,
+            input=f"Question: {question}\n\nDocuments:\n{context}",
+            max_output_tokens=2000,
         )
-        text = (resp.choices[0].message.content or "").strip()
+        text = (resp.output_text or "").strip()
         match = re.search(r"\{[\s\S]*\}", text)
         if match:
             data = json.loads(match.group())
