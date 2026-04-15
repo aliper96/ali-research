@@ -590,6 +590,34 @@ async def download_artifact(session_id: str, filename: str) -> Response:
 
 
 # ---------------------------------------------------------------------------
+# PDF inline proxy — serves PDFs from the LaTeX compiler service with
+# Content-Disposition: inline so browsers display them instead of downloading.
+# ---------------------------------------------------------------------------
+
+@app.get("/api/pdf-proxy")
+async def pdf_proxy(src: str = Query(..., description="Full URL of the PDF on the LaTeX service")):
+    """Fetch a PDF from the latex compiler service and return it inline."""
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(src)
+            resp.raise_for_status()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not fetch PDF: {exc}")
+
+    filename = src.rsplit("/", 1)[-1] or "document.pdf"
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        iter([resp.content]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # Knowledge / papers_memory search endpoint
 # ---------------------------------------------------------------------------
 
@@ -920,6 +948,250 @@ async def request_annotated_pdf(session_id: str) -> dict:
             detail="Annotated PDF generation failed. Check that the LaTeX compiler service is running.",
         )
     return {"annotated_pdf_url": pdf_url}
+
+
+class PatchSelection(BaseModel):
+    section_idx: int
+    suggestion_idx: int
+
+class PatchRequest(BaseModel):
+    suggestions: list[PatchSelection]
+
+@app.post("/api/latexcoach/{session_id}/patch")
+async def patch_latex_suggestions(session_id: str, req: PatchRequest):
+    """
+    Apply selected suggestions to the original zip and return a downloadable patched zip.
+    Each suggestion is identified by (section_idx, suggestion_idx).
+    """
+    from fastapi.responses import StreamingResponse
+    import io, zipfile
+
+    session = await latex_store.get_or_load_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    zip_bytes = latex_store.get_zip_bytes(session_id)
+    if zip_bytes is None:
+        raise HTTPException(status_code=410, detail="Original zip not available on disk.")
+
+    # Extract all tex files
+    from .agent.latex_coach import _extract_tex_files
+    tex_files = _extract_tex_files(zip_bytes)
+    modified: dict[str, str] = {k: v for k, v in tex_files.items()}
+
+    applied = 0
+    skipped = 0
+    for sel in req.suggestions:
+        try:
+            sec = session.sections[sel.section_idx]
+            sug = sec.suggestions[sel.suggestion_idx]
+        except IndexError:
+            skipped += 1
+            continue
+
+        if not sug.target_text or not sug.replacement:
+            skipped += 1
+            continue
+
+        fname = sug.file
+        if fname not in modified:
+            skipped += 1
+            continue
+
+        target = sug.target_text.strip()
+        if target and target in modified[fname]:
+            modified[fname] = modified[fname].replace(target, sug.replacement.strip(), 1)
+            applied += 1
+        else:
+            skipped += 1
+
+    logger.info("[Patch] session=%s applied=%d skipped=%d", session_id, applied, skipped)
+
+    # Reconstruct zip
+    buf = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z_in:
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z_out:
+            for item in z_in.infolist():
+                if item.filename in modified:
+                    z_out.writestr(item, modified[item.filename].encode("utf-8"))
+                else:
+                    z_out.writestr(item, z_in.read(item.filename))
+
+    buf.seek(0)
+    base = session.filename.rsplit(".", 1)[0] if session.filename else "project"
+    download_name = f"{base}_patched.zip"
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
+    )
+
+
+def _brace_delta(text: str) -> int:
+    """Net brace count: positive = more { than }, negative = more } than {."""
+    count = 0
+    for ch in text:
+        if ch == '{':
+            count += 1
+        elif ch == '}':
+            count -= 1
+    return count
+
+def _has_early_close(text: str) -> bool:
+    """Return True if a } appears before its matching { (would cause 'Too many }'s)."""
+    depth = 0
+    for ch in text:
+        if ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth < 0:
+                return True
+    return False
+
+# LaTeX structural commands that break the document if injected in wrong context
+_STRUCTURAL_CMDS = (r"\item", r"\begin{", r"\end{", r"\section", r"\subsection",
+                    r"\chapter", r"\paragraph", r"\subparagraph")
+
+def _safe_to_apply(target: str, replacement: str) -> bool:
+    """Return True if replacing target with replacement is structurally safe."""
+    # Both must have the same net brace delta — they rely on surrounding context equally
+    if _brace_delta(target) != _brace_delta(replacement):
+        return False
+    # Replacement must not have a } before its matching {
+    if _has_early_close(replacement):
+        return False
+    # Skip structural commands that break list/section context
+    if any(cmd in replacement for cmd in _STRUCTURAL_CMDS):
+        return False
+    return True
+
+
+def _build_patched_zip(zip_bytes: bytes, session, req_suggestions: list) -> bytes:
+    """Helper: apply patch selections and return new zip bytes."""
+    import io as _io, zipfile as _zf
+    from .agent.latex_coach import _extract_tex_files
+    tex_files = _extract_tex_files(zip_bytes)
+    modified: dict[str, str] = {k: v for k, v in tex_files.items()}
+    for sel in req_suggestions:
+        try:
+            sec = session.sections[sel.section_idx]
+            sug = sec.suggestions[sel.suggestion_idx]
+        except IndexError:
+            continue
+        if not sug.target_text or not sug.replacement:
+            continue
+        target = sug.target_text.strip()
+        replacement = sug.replacement.strip()
+        # Skip replacements that would break LaTeX structure
+        if not _safe_to_apply(target, replacement):
+            logger.info("[Patch] skipping unsafe replacement for %s:%d — brace delta mismatch or structural cmd",
+                        sug.file, sug.start_line)
+            continue
+        fname = sug.file
+        if fname in modified and target and target in modified[fname]:
+            modified[fname] = modified[fname].replace(target, replacement, 1)
+    buf = _io.BytesIO()
+    with _zf.ZipFile(_io.BytesIO(zip_bytes)) as z_in:
+        with _zf.ZipFile(buf, "w", _zf.ZIP_DEFLATED) as z_out:
+            for item in z_in.infolist():
+                if item.filename in modified:
+                    z_out.writestr(item, modified[item.filename].encode("utf-8"))
+                else:
+                    z_out.writestr(item, z_in.read(item.filename))
+    return buf.getvalue()
+
+
+@app.post("/api/latexcoach/{session_id}/patch-preview")
+async def patch_preview(session_id: str, req: PatchRequest) -> dict:
+    """
+    Apply selected suggestions, compile the patched zip, and return the PDF URL.
+    Stores the result as patched_pdf_url in the session.
+    """
+    from .agent.latex_coach import _compile_zip
+    session = await latex_store.get_or_load_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    zip_bytes = latex_store.get_zip_bytes(session_id)
+    if zip_bytes is None:
+        raise HTTPException(status_code=410, detail="Original zip not available on disk.")
+
+    patched_zip = _build_patched_zip(zip_bytes, session, req.suggestions)
+    result = await _compile_zip(patched_zip, session.filename or "patched.zip", lenient=True)
+    logger.info("[PatchPreview] success=%s pdf_url=%s errors=%s", result.success, result.pdf_url, result.errors[:5])
+
+    if result.pdf_url:
+        session.patched_pdf_url = result.pdf_url
+        await latex_store.update_session(session)
+    return {
+        "patched_pdf_url": result.pdf_url,
+        "success": result.success,
+        "errors": result.errors[:10],
+    }
+
+
+@app.get("/api/latexcoach/{session_id}/raw")
+async def get_raw_tex(session_id: str, file: str = Query(default="")) -> dict:
+    """
+    Return the raw .tex source files from the original zip.
+    If `file` is specified, return only that file's content.
+    """
+    from .agent.latex_coach import _extract_tex_files, _find_main_key
+    zip_bytes = latex_store.get_zip_bytes(session_id)
+    if zip_bytes is None:
+        raise HTTPException(status_code=410, detail="Original zip not available on disk.")
+    tex_files = _extract_tex_files(zip_bytes)
+    if not tex_files:
+        raise HTTPException(status_code=404, detail="No .tex files found in zip.")
+    main_key = _find_main_key(tex_files)
+    if file:
+        content = tex_files.get(file)
+        if content is None:
+            raise HTTPException(status_code=404, detail=f"File '{file}' not found in zip.")
+        return {"file": file, "content": content, "files": list(tex_files.keys()), "main": main_key}
+    # Return all files index + main file content
+    return {"file": main_key, "content": tex_files.get(main_key, ""), "files": list(tex_files.keys()), "main": main_key}
+
+
+class CompileEditRequest(BaseModel):
+    file: str
+    content: str
+
+@app.post("/api/latexcoach/{session_id}/compile-edit")
+async def compile_edit(session_id: str, req: CompileEditRequest) -> dict:
+    """
+    Replace a single .tex file in the original zip with edited content, compile, return PDF URL.
+    Powers the inline editor (Raw tab) — like Overleaf's compile button.
+    """
+    import io as _io, zipfile as _zf
+    from .agent.latex_coach import _compile_zip
+
+    zip_bytes = latex_store.get_zip_bytes(session_id)
+    if zip_bytes is None:
+        raise HTTPException(status_code=410, detail="Original zip not available on disk.")
+
+    # Replace only the edited file; keep everything else intact
+    buf = _io.BytesIO()
+    with _zf.ZipFile(_io.BytesIO(zip_bytes)) as z_in:
+        with _zf.ZipFile(buf, "w", _zf.ZIP_DEFLATED) as z_out:
+            replaced = False
+            for item in z_in.infolist():
+                if item.filename == req.file:
+                    z_out.writestr(item, req.content.encode("utf-8"))
+                    replaced = True
+                else:
+                    z_out.writestr(item, z_in.read(item.filename))
+            if not replaced:
+                # File wasn't in zip — add it at root
+                z_out.writestr(req.file, req.content.encode("utf-8"))
+
+    result = await _compile_zip(buf.getvalue(), req.file, lenient=True)
+    if not result.pdf_url:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Compilation failed: {'; '.join(result.errors[:5])}",
+        )
+    return {"pdf_url": result.pdf_url, "errors": result.errors[:10], "warnings": result.warnings[:10]}
 
 
 @app.post("/api/latexcoach/{session_id}/reanalyze")

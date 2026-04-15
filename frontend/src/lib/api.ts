@@ -550,6 +550,27 @@ export async function reanalyzeLatexCoach(sessionId: string): Promise<{ session_
   })
 }
 
+export async function patchLatexCoach(
+  sessionId: string,
+  suggestions: Array<{ section_idx: number; suggestion_idx: number }>,
+): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/latexcoach/${sessionId}/patch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ suggestions }),
+  })
+  if (!res.ok) throw new Error(`Patch failed: ${res.status}`)
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  const cd = res.headers.get('content-disposition') || ''
+  const match = cd.match(/filename="([^"]+)"/)
+  a.download = match ? match[1] : 'patched.zip'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 // ---------------------------------------------------------------------------
 // Internal SSE helper
 // ---------------------------------------------------------------------------

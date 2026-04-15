@@ -127,6 +127,9 @@ class LatexCoachSession(BaseModel):
     # PDF anotado (versión en rojo generada por el coach)
     annotated_pdf_url: Optional[str] = None
 
+    # PDF compilado después de aplicar parches seleccionados
+    patched_pdf_url: Optional[str] = None
+
     # Progreso y logs
     created_at: str = ""
     progress: Progress = Field(default_factory=Progress)
