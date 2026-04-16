@@ -402,6 +402,17 @@ export async function startWebSearch(
   })
 }
 
+export async function startSmartSearch(
+  input: string,
+  depth: Depth = 'standard',
+  recency: WebSearchRecency = 'any',
+): Promise<{ mode: 'papers' | 'web'; session_id: string }> {
+  return fetchJSON('/api/search', {
+    method: 'POST',
+    body: JSON.stringify({ input, depth, recency }),
+  })
+}
+
 export async function getWebSearchSession(sessionId: string): Promise<WebSearchSession> {
   return fetchJSON<WebSearchSession>(`/api/websearch/${sessionId}`)
 }

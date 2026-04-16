@@ -30,9 +30,11 @@ import asyncio
 import json
 import logging
 import os
+import re
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Query, UploadFile
@@ -1337,3 +1339,89 @@ async def stream_session(session_id: str) -> EventSourceResponse:
                 yield {"event": event_type or "message", "data": json.dumps(event)}
 
     return EventSourceResponse(_event_generator())
+
+
+# ---------------------------------------------------------------------------
+# Smart (unified) search — auto-classifies papers vs. web
+# ---------------------------------------------------------------------------
+
+def _classify_search_intent(query: str) -> Literal["papers", "web"]:
+    """
+    Fast rule-based classification.
+    Returns 'papers' for academic queries, 'web' for general questions.
+    """
+    q = query.strip()
+
+    # arXiv ID: 2301.07041 or 2301.07041v2
+    if re.match(r"^\d{4}\.\d{4,5}(v\d+)?$", q):
+        return "papers"
+
+    # DOI: 10.xxxx/...
+    if re.match(r"^10\.\d{4,}/\S+", q):
+        return "papers"
+
+    # URL → fetch paper / preprint
+    if re.match(r"^https?://", q, re.IGNORECASE):
+        return "papers"
+
+    q_lower = q.lower()
+
+    # Strong web signals
+    _WEB_PATTERNS = [
+        r"\bwho (is|are|was|were)\b",
+        r"\bwhat is (the )?(price|cost|best|latest|weather|capital)\b",
+        r"\bhow (much|many)\b",
+        r"\b(latest|breaking|today|this week|this month|right now|currently|trending)\b",
+        r"\b(news|stock price|weather|sports|movie|film|podcast|album|song|tv show)\b",
+        r"\b(buy|price|cheap|discount|coupon|shop|order)\b",
+        r"\b(vs\.?|versus|compared? to|better than|which is better)\b",
+        r"\b(tutorial|how-to|how to|step.by.step|recipe|install|setup|configure)\b",
+        r"\b(review|rating|worth it|should i buy|recommend)\b",
+        r"\b(person|company|startup|ceo|politician|actor|singer|athlete)\b",
+    ]
+    for pattern in _WEB_PATTERNS:
+        if re.search(pattern, q_lower):
+            return "web"
+
+    # Questions ending with ? lean toward web
+    if q.endswith("?"):
+        return "web"
+
+    # Default: papers (this is an academic research tool)
+    return "papers"
+
+
+class SmartSearchRequest(BaseModel):
+    input: str
+    depth: str = "standard"
+    recency: str = "any"
+
+
+@app.post("/api/search")
+async def smart_search(body: SmartSearchRequest, background_tasks: BackgroundTasks) -> dict:
+    """
+    Unified search endpoint.
+    Automatically classifies the query as 'papers' (arXiv/Semantic Scholar)
+    or 'web' (SearXNG synthesis) and starts the appropriate session.
+    Returns { mode, session_id }.
+    """
+    mode = _classify_search_intent(body.input)
+
+    if mode == "papers":
+        session = await session_store.create_session(body.input)
+        background_tasks.add_task(
+            run_research,
+            session_id=session.session_id,
+            user_input=body.input,
+            depth=body.depth,
+        )
+        return {"mode": "papers", "session_id": session.session_id}
+    else:
+        session = await websearch_store.create_session(body.input)
+        background_tasks.add_task(
+            run_websearch,
+            session_id=session.session_id,
+            user_input=body.input,
+            recency=body.recency,
+        )
+        return {"mode": "web", "session_id": session.session_id}

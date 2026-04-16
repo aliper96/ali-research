@@ -1,24 +1,24 @@
-import SearchForm from '@/components/SearchForm'
+import UnifiedSearch from '@/components/UnifiedSearch'
 import SessionHistory from '@/components/SessionHistory'
 import {
-  BookOpen, Cpu, Database, Globe, FileText, FlaskConical,
+  Cpu, Database, Globe, FileText, FlaskConical,
   Bell, GitCompareArrows, RefreshCw, BookMarked, FolderOpen,
   Brain, Search, BookOpenCheck, ArrowRight, FileCode2,
 } from 'lucide-react'
 import Link from 'next/link'
 
-// Featured workflows — shown as prominent cards
-const PRIMARY_SHORTCUTS = [
+// Featured workflow card
+const FEATURED = [
   {
-    href: '/websearch',
-    icon: Search,
-    label: 'Web Search',
-    description: 'Search the web and get a cited, synthesized answer — like Perplexity, no API keys needed.',
-    color: 'cyan',
-    border: 'border-cyan-900/50 hover:border-cyan-700/60',
-    bg: 'bg-cyan-950/20 hover:bg-cyan-900/15',
-    iconColor: 'text-cyan-400',
-    badge: 'SearXNG',
+    href: '/deepresearch',
+    icon: Cpu,
+    label: 'Deep Research',
+    description: 'Multi-step autonomous research over arXiv and Semantic Scholar with roadmap generation.',
+    color: 'indigo',
+    border: 'border-indigo-900/50 hover:border-indigo-700/60',
+    bg: 'bg-indigo-950/20 hover:bg-indigo-900/15',
+    iconColor: 'text-indigo-400',
+    badge: 'Agentic',
   },
   {
     href: '/docs',
@@ -33,23 +33,9 @@ const PRIMARY_SHORTCUTS = [
   },
 ]
 
-// Featured workflows â€” shown as prominent cards
-const FEATURED = [
-  {
-    href: '/deepresearch',
-    icon: Cpu,
-    label: 'Deep Research',
-    description: 'Multi-step autonomous research over arXiv and Semantic Scholar with roadmap generation.',
-    color: 'indigo',
-    border: 'border-indigo-900/50 hover:border-indigo-700/60',
-    bg: 'bg-indigo-950/20 hover:bg-indigo-900/15',
-    iconColor: 'text-indigo-400',
-    badge: 'Agentic',
-  },
-]
-
 // Secondary tools — compact chip row
 const SECONDARY = [
+  { href: '/websearch',    icon: Search,           label: 'Web Search',    color: 'hover:text-cyan-300' },
   { href: '/latexcoach',   icon: FileCode2,        label: 'LaTeX Coach',   color: 'hover:text-emerald-300' },
   { href: '/review',       icon: FileText,         label: 'Review Paper',  color: 'hover:text-violet-300' },
   { href: '/audit',        icon: FlaskConical,     label: 'Audit Paper',   color: 'hover:text-amber-300' },
@@ -99,50 +85,21 @@ export default function HomePage() {
 
           <p className="text-lg text-slate-400 max-w-lg mx-auto leading-relaxed">
             AI-powered research assistant.{' '}
-            <span className="text-slate-300">Explore papers, search the web, chat with your documents.</span>
+            <span className="text-slate-300">Search papers or the web — it figures out which automatically.</span>
           </p>
         </div>
 
         {/* ── Main search ─────────────────────────────────────────────────── */}
         <div className="w-full mb-16">
-          <SearchForm />
-
-          <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {PRIMARY_SHORTCUTS.map((item) => {
-              const Icon = item.icon
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`group flex flex-col gap-3 rounded-2xl border ${item.border} ${item.bg} p-5 transition-all duration-200 hover:-translate-y-0.5`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className={`flex h-10 w-10 items-center justify-center rounded-2xl border border-current/20 bg-black/10 ${item.iconColor}`}>
-                        <Icon className="h-4 w-4" />
-                      </div>
-                      <div>
-                        <div className="text-sm font-semibold text-slate-100">{item.label}</div>
-                        <div className="text-[11px] font-mono text-slate-600">{item.badge}</div>
-                      </div>
-                    </div>
-                    <ArrowRight className={`h-4 w-4 ${item.iconColor} transition-transform duration-200 group-hover:translate-x-1`} />
-                  </div>
-                  <p className="text-sm leading-relaxed text-slate-400">
-                    {item.description}
-                  </p>
-                </Link>
-              )
-            })}
-          </div>
+          <UnifiedSearch />
         </div>
 
         {/* ── Featured workflows ──────────────────────────────────────────── */}
         <div className="mb-10">
           <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-600 mb-4">
-            Featured workflow
+            Featured workflows
           </p>
-          <div className="grid grid-cols-1 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {FEATURED.map((item) => {
               const Icon = item.icon
               return (
@@ -196,9 +153,9 @@ export default function HomePage() {
         <div className="mt-12 grid grid-cols-1 gap-3 sm:grid-cols-3">
           {[
             {
-              icon: <BookOpen className="h-4 w-4 text-indigo-400" />,
-              title: 'Paper Discovery',
-              description: 'arXiv, Semantic Scholar and curated databases',
+              icon: <Search className="h-4 w-4 text-indigo-400" />,
+              title: 'Smart Search',
+              description: 'Auto-detects papers vs. web — just type and go',
             },
             {
               icon: <Cpu className="h-4 w-4 text-indigo-400" />,

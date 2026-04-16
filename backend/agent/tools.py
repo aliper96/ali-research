@@ -29,6 +29,80 @@ _SS_FIELDS = (
     "title,authors,year,abstract,citationCount,externalIds,url,"
     "referenceCount,influentialCitationCount,venue,publicationVenue"
 )
+
+# ---------------------------------------------------------------------------
+# Semantic Scholar rate-limit guard
+# ---------------------------------------------------------------------------
+# Free tier: ~100 req/5 min (≈ 1 req/3 s to be safe).
+# With S2_API_KEY: 1 req/s officially, but still be conservative.
+# We use a semaphore (1 concurrent) + a minimum delay between calls.
+
+_S2_LOCK = asyncio.Lock()           # serialise all S2 calls
+_S2_LAST_CALL: float = 0.0          # epoch time of last completed call
+_S2_MIN_INTERVAL: float = float(os.environ.get("S2_MIN_INTERVAL", "1.2"))  # seconds
+
+
+def _s2_headers() -> dict[str, str]:
+    """Return headers for Semantic Scholar API, injecting key if configured."""
+    h: dict[str, str] = {"User-Agent": "ali_researcher/1.0"}
+    key = os.environ.get("S2_API_KEY", "").strip()
+    if key:
+        h["x-api-key"] = key
+    return h
+
+
+async def _s2_get(url: str, params: dict[str, Any]) -> dict[str, Any]:
+    """
+    Rate-limited GET to the Semantic Scholar API with exponential-backoff retry.
+
+    • Serialises all calls through _S2_LOCK with a minimum inter-call interval
+      so we never fire more than ~1 req/s.
+    • On 429 the lock is released BEFORE sleeping, so other coroutines don't
+      pile up behind the backoff wait.
+    • Retries up to 4 times with backoff: 8 s → 24 s → 72 s → 216 s.
+    """
+    global _S2_LAST_CALL
+
+    for attempt in range(4):
+        # ── 1. Acquire lock, enforce spacing, fire request ───────────────────
+        retry_after: float | None = None
+        try:
+            async with _S2_LOCK:
+                now = asyncio.get_event_loop().time()
+                gap = _S2_MIN_INTERVAL - (now - _S2_LAST_CALL)
+                if gap > 0:
+                    await asyncio.sleep(gap)
+
+                async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+                    resp = await client.get(url, params=params, headers=_s2_headers())
+                    _S2_LAST_CALL = asyncio.get_event_loop().time()
+
+                if resp.status_code == 429:
+                    # Respect Retry-After but cap at 60s so sessions don't stall
+                    raw = float(resp.headers.get("Retry-After", 10 * (2 ** attempt)))
+                    retry_after = min(raw, 60.0)
+                else:
+                    resp.raise_for_status()
+                    return resp.json()
+
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 429:
+                raise
+            raw = float(exc.response.headers.get("Retry-After", 10 * (2 ** attempt)))
+            retry_after = min(raw, 60.0)
+
+        # ── 2. Sleep OUTSIDE the lock so other callers aren't blocked ────────
+        if retry_after is not None:
+            logger.warning(
+                "Semantic Scholar 429 — sleeping %.0fs before retry %d/4", retry_after, attempt + 1
+            )
+            await asyncio.sleep(retry_after)
+
+    # Exhausted retries — return empty dict so callers get [] gracefully
+    logger.error("Semantic Scholar API rate-limit: giving up after 4 attempts for %s", url)
+    return {}
+
+
 _COMMON_STOPWORDS = {
     "the", "and", "for", "with", "that", "from", "this", "into", "using",
     "their", "have", "been", "were", "which", "such", "also", "than",
@@ -186,20 +260,68 @@ async def _http_get_json(
         return response.json()
 
 
-async def search_arxiv(query: str, max_results: int = 10) -> list[dict[str, Any]]:
+def _trim_arxiv_query(query: str, max_words: int = 8) -> str:
+    """
+    arXiv performs poorly (slow / 429) on queries longer than ~8 words.
+    Keep only the first max_words content words, discarding stop-words at
+    the end so the trimmed query stays meaningful.
+    """
+    words = query.split()
+    if len(words) <= max_words:
+        return query
+    trimmed = words[:max_words]
+    # Drop trailing stop-words so we don't end on "and", "for", etc.
+    stops = {"and", "or", "for", "with", "the", "a", "an", "of", "in", "on", "to"}
+    while trimmed and trimmed[-1].lower() in stops:
+        trimmed.pop()
+    result = " ".join(trimmed) if trimmed else " ".join(words[:max_words])
+    logger.debug("arXiv query trimmed: %r → %r", query, result)
+    return result
+
+
+async def search_arxiv(
+    query: str,
+    max_results: int = 10,
+    sort_by: str = "relevance",
+    year_from: int | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Search arXiv for academic papers.
+
+    sort_by:  "relevance" (default) | "recent" (newest submissions first)
+    year_from: if set, only return papers published in that year or later.
+               Uses post-filtering because arXiv date-query syntax is fragile
+               when combined with keyword queries.
+    """
     import arxiv
 
+    # arXiv 429s on very long queries — trim to 8 keywords
+    effective_query = _trim_arxiv_query(query, max_words=8)
+
+    # Cap total results: arXiv's internal page size is always 100 regardless,
+    # so requesting more than 15 just means waiting for multiple pages.
+    max_results = min(max_results, 15)
+
+    criterion = (
+        arxiv.SortCriterion.SubmittedDate
+        if sort_by == "recent"
+        else arxiv.SortCriterion.Relevance
+    )
+
     def _sync_search() -> list[dict[str, Any]]:
-        search = arxiv.Search(query=query, max_results=max_results, sort_by=arxiv.SortCriterion.Relevance)
+        search = arxiv.Search(query=effective_query, max_results=max_results, sort_by=criterion)
         results: list[dict[str, Any]] = []
         for paper in search.results():
+            paper_year = paper.published.year if paper.published else None
+            if year_from and paper_year and paper_year < year_from:
+                continue
             arxiv_id = paper.entry_id.split("/")[-1]
             results.append(
                 {
                     "id": arxiv_id,
                     "title": paper.title,
                     "authors": [str(author) for author in paper.authors],
-                    "year": paper.published.year if paper.published else None,
+                    "year": paper_year,
                     "abstract": paper.summary,
                     "url": paper.entry_id,
                     "arxiv_id": arxiv_id,
@@ -210,6 +332,8 @@ async def search_arxiv(query: str, max_results: int = 10) -> list[dict[str, Any]
                     "pdf_url": getattr(paper, "pdf_url", None),
                 }
             )
+            if len(results) >= max_results:
+                break
         return results
 
     try:
@@ -252,28 +376,23 @@ async def get_arxiv_paper(arxiv_id: str) -> dict[str, Any]:
         return {}
 
 
-async def search_semantic_scholar(query: str, max_results: int = 10) -> list[dict[str, Any]]:
-    # Retry up to 3 times with backoff on 429
-    for attempt in range(3):
-        try:
-            data = await _http_get_json(
-                f"{_SEMSCHOLAR_BASE}/paper/search",
-                params={"query": query, "limit": max_results, "fields": _SS_FIELDS},
-                headers={"User-Agent": "ali_researcher/1.0"},
-            )
-            break  # success
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 429 and attempt < 2:
-                await asyncio.sleep(2 ** attempt + 1)  # 2s, 3s
-                continue
-            logger.error("search_semantic_scholar failed: %s", exc)
-            return []
-        except Exception as exc:
-            logger.error("search_semantic_scholar failed: %s", exc)
-            return []
-    else:
-        return []
+async def search_semantic_scholar(
+    query: str,
+    max_results: int = 10,
+    year_from: int | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Search Semantic Scholar for academic papers.
+
+    year_from: if set, only return papers from that year onwards.
+               Passed as the native ``year`` API parameter (e.g. "2022-").
+    """
+    params: dict[str, Any] = {"query": query, "limit": max_results, "fields": _SS_FIELDS}
+    if year_from:
+        params["year"] = f"{year_from}-"
+
     try:
+        data = await _s2_get(f"{_SEMSCHOLAR_BASE}/paper/search", params)
         papers: list[dict[str, Any]] = []
         for item in data.get("data", []):
             ext = item.get("externalIds") or {}
@@ -300,10 +419,9 @@ async def search_semantic_scholar(query: str, max_results: int = 10) -> list[dic
 
 async def _get_semantic_scholar_paper(paper_id: str) -> dict[str, Any]:
     try:
-        data = await _http_get_json(
+        data = await _s2_get(
             f"{_SEMSCHOLAR_BASE}/paper/{paper_id}",
-            params={"fields": _SS_FIELDS},
-            headers={"User-Agent": "ali_researcher/1.0"},
+            {"fields": _SS_FIELDS},
         )
         ext = data.get("externalIds") or {}
         return {
@@ -340,10 +458,9 @@ async def get_paper_citations(paper_id: str, source: str = "semantic_scholar", m
 
     s2_id = _normalize_s2_id(paper_id)
     try:
-        data = await _http_get_json(
+        data = await _s2_get(
             f"{_SEMSCHOLAR_BASE}/paper/{s2_id}/citations",
-            params={"fields": _SS_FIELDS, "limit": max_results},
-            headers={"User-Agent": "ali_researcher/1.0"},
+            {"fields": _SS_FIELDS, "limit": max_results},
         )
         citations: list[dict[str, Any]] = []
         for item in data.get("data", []):
@@ -379,10 +496,9 @@ async def get_references(paper_id: str, source: str = "semantic_scholar", max_re
 
     s2_id = _normalize_s2_id(paper_id)
     try:
-        data = await _http_get_json(
+        data = await _s2_get(
             f"{_SEMSCHOLAR_BASE}/paper/{s2_id}/references",
-            params={"fields": _SS_FIELDS, "limit": max_results},
-            headers={"User-Agent": "ali_researcher/1.0"},
+            {"fields": _SS_FIELDS, "limit": max_results},
         )
         references: list[dict[str, Any]] = []
         for item in data.get("data", []):
@@ -409,6 +525,57 @@ async def get_references(paper_id: str, source: str = "semantic_scholar", max_re
         return references
     except Exception as exc:
         logger.error("get_references failed: %s", exc)
+        return []
+
+
+async def get_related_papers(
+    paper_id: str,
+    year_from: int | None = None,
+    max_results: int = 15,
+) -> list[dict[str, Any]]:
+    """
+    Find papers semantically similar to a given paper using the Semantic Scholar
+    Recommendations API. Ideal for discovering recent follow-up work.
+
+    paper_id: Semantic Scholar paper ID or arXiv ID (e.g. "2301.07041")
+    year_from: only return papers published in this year or later
+    max_results: max papers to return (capped at 500 by the API)
+    """
+    s2_id = _normalize_s2_id(paper_id)
+    try:
+        data = await _s2_get(
+            f"https://api.semanticscholar.org/recommendations/v1/papers/forpaper/{s2_id}",
+            {"fields": _SS_FIELDS, "limit": min(max_results * 3, 100)},
+        )
+        papers: list[dict[str, Any]] = []
+        for item in data.get("recommendedPapers", []):
+            ext = item.get("externalIds") or {}
+            year = item.get("year")
+            if year_from and year and year < year_from:
+                continue
+            papers.append(
+                {
+                    "id": item.get("paperId", ""),
+                    "title": item.get("title", ""),
+                    "authors": [a.get("name", "") for a in item.get("authors", [])],
+                    "year": year,
+                    "abstract": item.get("abstract") or "",
+                    "url": item.get("url") or f"https://www.semanticscholar.org/paper/{item.get('paperId', '')}",
+                    "arxiv_id": ext.get("ArXiv"),
+                    "doi": ext.get("DOI"),
+                    "citation_count": item.get("citationCount", 0),
+                    "tags": [item.get("venue")] if item.get("venue") else [],
+                    "source": "semantic_scholar",
+                    "recommended_from": paper_id,
+                }
+            )
+            if len(papers) >= max_results:
+                break
+        # Sort by year descending so newest appear first
+        papers.sort(key=lambda p: (p.get("year") or 0), reverse=True)
+        return papers
+    except Exception as exc:
+        logger.error("get_related_papers failed for %s: %s", paper_id, exc)
         return []
 
 
@@ -973,11 +1140,12 @@ def _tool_spec(name: str, description: str, properties: dict[str, Any], required
 
 
 TOOL_SPECS: list[dict[str, Any]] = [
-    _tool_spec("search_arxiv", "Search arXiv for academic papers.", {"query": {"type": "string"}, "max_results": {"type": "integer", "default": 10}}, ["query"]),
+    _tool_spec("search_arxiv", "Search arXiv for academic papers. Use sort_by='recent' to get newest papers first. Use year_from to restrict to papers from a given year onwards.", {"query": {"type": "string"}, "max_results": {"type": "integer", "default": 10}, "sort_by": {"type": "string", "enum": ["relevance", "recent"], "default": "relevance"}, "year_from": {"type": "integer", "description": "Only return papers from this year onwards (e.g. 2022)"}}, ["query"]),
     _tool_spec("get_arxiv_paper", "Fetch a specific paper from arXiv by ID.", {"arxiv_id": {"type": "string"}}, ["arxiv_id"]),
-    _tool_spec("search_semantic_scholar", "Search Semantic Scholar for academic papers.", {"query": {"type": "string"}, "max_results": {"type": "integer", "default": 10}}, ["query"]),
-    _tool_spec("get_paper_citations", "Fetch papers that cite a given Semantic Scholar paper ID.", {"paper_id": {"type": "string"}, "source": {"type": "string", "default": "semantic_scholar"}, "max_results": {"type": "integer", "default": 25}}, ["paper_id"]),
-    _tool_spec("get_references", "Fetch references for a given Semantic Scholar paper ID.", {"paper_id": {"type": "string"}, "source": {"type": "string", "default": "semantic_scholar"}, "max_results": {"type": "integer", "default": 25}}, ["paper_id"]),
+    _tool_spec("search_semantic_scholar", "Search Semantic Scholar for academic papers. Use year_from to restrict results to recent papers.", {"query": {"type": "string"}, "max_results": {"type": "integer", "default": 10}, "year_from": {"type": "integer", "description": "Only return papers from this year onwards (e.g. 2022)"}}, ["query"]),
+    _tool_spec("get_paper_citations", "Fetch papers that cite a given Semantic Scholar paper ID — these are NEWER papers that built on this work.", {"paper_id": {"type": "string"}, "source": {"type": "string", "default": "semantic_scholar"}, "max_results": {"type": "integer", "default": 25}}, ["paper_id"]),
+    _tool_spec("get_references", "Fetch references for a given Semantic Scholar paper ID — these are OLDER papers cited by this work.", {"paper_id": {"type": "string"}, "source": {"type": "string", "default": "semantic_scholar"}, "max_results": {"type": "integer", "default": 25}}, ["paper_id"]),
+    _tool_spec("get_related_papers", "Find semantically similar papers using Semantic Scholar recommendations — ideal for discovering recent follow-up work. Returns results sorted by year descending.", {"paper_id": {"type": "string", "description": "Semantic Scholar paper ID or arXiv ID"}, "year_from": {"type": "integer", "description": "Only include papers from this year onwards"}, "max_results": {"type": "integer", "default": 15}}, ["paper_id"]),
     _tool_spec("search_web", "Search the web for tutorials, news, and supplementary information.", {"query": {"type": "string"}, "max_results": {"type": "integer"}}, ["query"]),
     _tool_spec("search_google_scholar", "Search Google Scholar for academic papers — use this for citation counts, related work, and papers not on arXiv.", {"query": {"type": "string"}, "max_results": {"type": "integer"}}, ["query"]),
     _tool_spec("search_code", "Search GitHub repositories for implementations and code resources.", {"query": {"type": "string"}, "max_results": {"type": "integer", "default": 10}}, ["query"]),
@@ -1018,6 +1186,7 @@ _TOOL_MAP = {
     "search_semantic_scholar": search_semantic_scholar,
     "get_paper_citations": get_paper_citations,
     "get_references": get_references,
+    "get_related_papers": get_related_papers,
     "search_web": search_web,
     "search_google_scholar": search_google_scholar,
     "search_code": search_code,

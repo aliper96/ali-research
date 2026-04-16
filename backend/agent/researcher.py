@@ -38,7 +38,7 @@ SYSTEM_PROMPT = """You are an expert academic researcher. Given a paper or topic
 5. Synthesize your findings into a comprehensive research report
 
 You have access to tools for:
-- paper retrieval: search_arxiv, get_arxiv_paper, search_semantic_scholar, search_google_scholar, search_papers, get_paper_metadata, get_references, get_paper_citations, resolve_paper_id
+- paper retrieval: search_arxiv, get_arxiv_paper, search_semantic_scholar, search_google_scholar, search_papers, get_paper_metadata, get_references, get_paper_citations, get_related_papers, resolve_paper_id
 - supplemental sources: search_web, search_code, parse_pdf
 - analysis: extract_claims, extract_methodology, extract_results, extract_limitations, compare_papers, find_gaps, timeline_topic, citation_check, quality_review, compact_context
 - synthesis/planning: plan_research, generate_report, build_reading_list, build_implementation_plan, generate_bibliography
@@ -50,6 +50,34 @@ quick: at least 5 papers | standard: at least 10 papers | deep: at least 20 pape
 
 You MUST reach the target before writing the final JSON. If you are below target,
 run more searches with different query formulations — do NOT synthesise too early.
+
+── RECENCY — CRITICAL ──────────────────────────────────────────────────────────
+The user's goal is often to find THE LATEST work on a topic, not just foundational
+papers. You MUST include recent papers (last 2–3 years) in every report.
+
+When the seed input is a specific paper (arXiv ID, DOI, or title):
+1. Resolve it to get its year (call get_arxiv_paper or resolve_paper_id first).
+2. Call get_paper_citations(paper_id) — papers that CITE the seed = NEWER work.
+3. Call get_related_papers(paper_id, year_from=seed_year) — semantically similar,
+   filtered to papers at least as recent as the seed.
+4. Call search_arxiv(query, sort_by="recent", year_from=seed_year+1) with the
+   seed paper's keywords — to find even more recent follow-ups.
+5. Call search_semantic_scholar(query, year_from=seed_year+1) for the same.
+6. Only call get_references AFTER you have enough recent papers, to understand
+   the historical context. References are OLDER papers (cited BY the seed).
+
+When the seed input is a topic/keyword (not a specific paper):
+1. Run one standard relevance search: search_papers(query)
+2. ALSO run: search_arxiv(query, sort_by="recent", year_from=<current_year-2>)
+   and search_semantic_scholar(query, year_from=<current_year-2>)
+   so you capture both classic and cutting-edge papers.
+3. Aim for a year distribution: ~30% foundational, ~70% from the last 3 years.
+
+General recency rules:
+- If ALL papers in your current set are more than 3 years old, run at least one
+  more recency search before synthesising.
+- Use search_arxiv(sort_by="recent") to surface pre-prints not yet indexed elsewhere.
+- Always mention the year range of your paper set in the summary.
 
 ── QUERY EXPANSION FOR NICHE / COMPOUND TOPICS ────────────────────────────────
 When a topic is a compound word, acronym, or very specific term that returns < 5
@@ -74,13 +102,14 @@ Rules for query expansion:
 
 ── PREFERRED WORKFLOW ──────────────────────────────────────────────────────────
 1. search_session_memory — check prior sessions first
-2. plan_research — list 3–5 query variations you will use
-3. search_papers (primary query) + search_semantic_scholar or search_google_scholar
-4. If result count < target: run search_arxiv / search_papers with 2–3 alternative queries
-5. get_references + get_paper_citations on the top 2–3 papers found
-6. get_paper_metadata / parse_pdf for the most important papers
-7. analysis tools (find_gaps, extract_methodology) on best texts
-8. final synthesis into the required JSON
+2. plan_research — list 3–5 query variations you will use, noting the seed year
+3. If seed is a paper: resolve_paper_id → get_paper_citations → get_related_papers
+4. search_arxiv(sort_by="recent", year_from=...) + search_semantic_scholar(year_from=...)
+5. search_papers (primary query, standard relevance) for foundational coverage
+6. If result count < target: try 2–3 more query formulations with recency filters
+7. get_paper_metadata / parse_pdf for the most important papers
+8. analysis tools (find_gaps, timeline_topic, extract_methodology)
+9. final synthesis into the required JSON
 
 ── PROVENANCE FIELDS ───────────────────────────────────────────────────────────
 - "source": "arxiv" | "semantic_scholar" | "google_scholar" | "web" | "crossref"
@@ -304,11 +333,15 @@ async def run_research(
                 f"Session ID: {session_id}\n"
                 f"Depth: {depth}\n\n"
                 f"IMPORTANT: You must find AT LEAST "
-                f"{ {'quick':5,'standard':10,'deep':20}.get(depth,10) } papers before synthesising.\n"
+                f"{ {'quick':5,'standard':10,'deep':20}.get(depth,10) } papers before synthesising.\n\n"
+                "RECENCY REQUIREMENT: Include recent papers (last 2–3 years). "
+                "If the seed is a specific paper, call get_paper_citations and get_related_papers to find "
+                "follow-up work, then search_arxiv(sort_by='recent') for pre-prints. "
+                "If it is a topic, run both a relevance search AND a recency search "
+                "(search_arxiv sort_by='recent', search_semantic_scholar year_from=<2-3 years ago>). "
+                "Do NOT deliver a report where all papers are older than 3 years.\n\n"
                 "If the exact topic has few results, EXPAND your queries — break compound words, "
-                "try synonyms, parent fields, and related terminology. "
-                "Use get_references and get_paper_citations on any paper you find "
-                "to discover more related works.\n\n"
+                "try synonyms, parent fields, and related terminology.\n\n"
                 "Use the tools to gather information, then return the final JSON report. "
                 "If you use budget_status, pass this exact session ID."
             ),
